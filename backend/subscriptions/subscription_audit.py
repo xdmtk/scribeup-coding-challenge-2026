@@ -3,7 +3,8 @@
 import json
 from collections import OrderedDict
 
-from .subscription_analysis import LIKELY_SUBSCRIPTION_THRESHOLD
+from .subscription_analysis import (LIKELY_SUBSCRIPTION_THRESHOLD, MIN_CUSTOM_TRANSACTIONS,
+                                    MIN_DIRECT_MATCH_RATIO)
 
 
 NEGATIVE_INTERVAL_EVIDENCE = "No stable interval between charges"
@@ -29,14 +30,22 @@ def suspicious_reasons(item):
         reasons.append("likely despite low timing consistency")
     if item["classification"] == "likely" and not cadence["label"]:
         reasons.append("likely with no detected cadence")
+    if (item["classification"] == "likely" and
+            cadence.get("direct_match_ratio", 0) < MIN_DIRECT_MATCH_RATIO):
+        reasons.append("likely despite low direct-match ratio")
     if item["classification"] == "likely" and not item["activity"]["apparently_active"]:
         reasons.append("likely but apparently inactive")
     if amount["consistency_score"] >= .90 and cadence["consistency_score"] < .40:
         reasons.append("high amount consistency but low timing consistency")
     if cadence["consistency_score"] >= .85 and item["classification"] == "unlikely":
         reasons.append("high timing consistency but unlikely")
-    if cadence["label"] and cadence["label"].startswith("every_") and count < 4:
-        reasons.append("custom cadence from fewer than four transactions")
+    if cadence["label"] and cadence["label"].startswith("every_") and count < MIN_CUSTOM_TRANSACTIONS:
+        reasons.append("custom cadence with insufficient observations")
+    if amount.get("exact_match_ratio", 0) >= .90 and count >= 5 and not cadence["label"]:
+        reasons.append("many identical charges with no detected cadence")
+    if (cadence.get("explained_ratio", 0) >= .70 and
+            cadence.get("direct_match_ratio", 0) < MIN_DIRECT_MATCH_RATIO):
+        reasons.append("high explained ratio but low direct-match ratio")
     if abs(item["confidence_score"] - LIKELY_SUBSCRIPTION_THRESHOLD) <= .05:
         reasons.append("confidence within 0.05 of threshold")
     return reasons
@@ -59,8 +68,10 @@ def build_report(users, total_transactions):
         ("groups_with_exactly_two_transactions", sum(i["transaction_count"] == 2 for i in items)),
         ("likely_with_exactly_two_transactions", sum(i["classification"] == "likely" and i["transaction_count"] == 2 for i in items)),
         ("cadence_evidence_contradictions", contradictions),
+        ("likely_with_no_detected_cadence", sum(i["classification"] == "likely" and not i["detected_cadence"]["label"] for i in items)),
+        ("custom_cadences_with_insufficient_observations", sum(bool(i["detected_cadence"]["label"] and i["detected_cadence"]["label"].startswith("every_") and i["transaction_count"] < MIN_CUSTOM_TRANSACTIONS) for i in items)),
         ("groups_with_no_detected_cadence", sum(not i["detected_cadence"]["label"] for i in items)),
-        ("apparently_inactive_groups", sum(not i["activity"]["apparently_active"] for i in items)),
+        ("apparently_inactive_groups", sum(i["activity"]["apparently_active"] is False for i in items)),
         ("confidence_buckets", buckets),
     ])
     borderline = [{"user_id": uid, **item} for uid, item in rows
@@ -103,6 +114,12 @@ def _render_group(item, index, max_transactions):
               f"typical_interval_days: {cadence['typical_interval_days']}",
               "intervals_days: " + ", ".join(map(str, cadence["intervals_days"])),
               f"timing_consistency: {cadence['consistency_score']:.3f}",
+              f"direct_matches: {cadence.get('direct_match_count', 0)}",
+              f"skipped_cycle_matches: {cadence.get('skipped_match_count', 0)}",
+              f"outliers: {cadence.get('outlier_count', len(cadence['intervals_days']))}",
+              f"direct_match_ratio: {cadence.get('direct_match_ratio', 0):.3f}",
+              f"explained_ratio: {cadence.get('explained_ratio', 0):.3f}",
+              f"median_direct_deviation_days: {cadence.get('median_direct_deviation_days')}",
               f"typical_amount: {_money(amounts['typical_amount'])}",
               f"amount_range: {_money(amounts['min_amount'])}–{_money(amounts['max_amount'])}",
               f"relative_amount_variation: {amounts['relative_variation']:.3f}",
