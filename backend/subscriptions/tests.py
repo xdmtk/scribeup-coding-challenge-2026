@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -173,3 +173,51 @@ class SubscriptionAnalysisTests(TestCase):
             self.assertLessEqual(result["confidence_score"], 1.0)
             self.assertTrue(result["evidence"])
             self.assertTrue({item["type"] for item in result["evidence"]}.issubset({"positive", "negative"}))
+
+    def test_noisy_monthly_history_with_one_skip_is_likely(self):
+        gaps = [32, 28, 32, 34, 25, 31, 34, 29, 55, 32, 27, 32, 34, 30, 28, 32]
+        dates = [date(2025, 1, 1)]
+        for gap in gaps:
+            dates.append(dates[-1] + timedelta(days=gap))
+        result = self.analyze(dates)
+        cadence = result["detected_cadence"]
+        self.assertEqual(result["classification"], "likely")
+        self.assertEqual(cadence["label"], "monthly")
+        self.assertGreaterEqual(cadence["direct_match_ratio"], .85)
+        self.assertEqual(cadence["skipped_match_count"], 1)
+        self.assertEqual(result["amount_analysis"]["consistency_score"], 1)
+
+    def test_three_long_intervals_do_not_invent_custom_cadence(self):
+        result = self.analyze(
+            [date(2024, 1, 1), date(2024, 8, 26), date(2025, 4, 22)],
+            ["517.67", "907.55", "1320.12"],
+        )
+        self.assertIsNone(result["detected_cadence"]["label"])
+        self.assertEqual(result["classification"], "unlikely")
+        self.assertLess(result["amount_analysis"]["consistency_score"], .35)
+        self.assertIn("Insufficient history to establish a custom cadence",
+                      [item["label"] for item in result["evidence"]])
+
+    def test_skips_without_direct_support_do_not_become_monthly(self):
+        start = date(2025, 1, 1)
+        dates = [start + timedelta(days=60 * index) for index in range(5)]
+        self.assertNotEqual(self.analyze(dates)["detected_cadence"]["label"], "monthly")
+
+    def test_custom_cadence_requires_five_transactions(self):
+        start = date(2025, 1, 1)
+        four = self.analyze([start + timedelta(days=40 * index) for index in range(4)])
+        five = self.analyze([start + timedelta(days=40 * index) for index in range(5)])
+        self.assertIsNone(four["detected_cadence"]["label"])
+        self.assertEqual(five["detected_cadence"]["label"], "every_40_days")
+
+    def test_equal_amounts_alone_cannot_be_likely_or_active(self):
+        result = self.analyze([date(2025, 1, 1), date(2025, 1, 10), date(2025, 4, 1),
+                               date(2025, 8, 20), date(2026, 7, 15)])
+        self.assertEqual(result["amount_analysis"]["consistency_score"], 1)
+        self.assertEqual(result["classification"], "unlikely")
+        self.assertIsNone(result["activity"]["apparently_active"])
+
+    def test_cadence_label_never_has_no_stable_interval_evidence(self):
+        result = self.analyze([date(2026, month, 15) for month in range(2, 8)])
+        labels = [item["label"] for item in result["evidence"]]
+        self.assertNotIn("No stable interval between charges", labels)

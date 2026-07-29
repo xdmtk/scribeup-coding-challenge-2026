@@ -182,12 +182,21 @@ function SubscriptionSection({ title, groups }) {
             <p style={styles.variants}>Variants: {group.merchant_variants.join(", ")}</p>
             <div style={styles.metrics}>
               <span>Observed intervals: {cadence.intervals_days.length ? `${cadence.intervals_days.join(", ")} days` : "not enough history"}</span>
-              <span>Typical interval: {cadence.typical_interval_days} days</span>
+              {cadence.label && <span>Typical interval: {cadence.typical_interval_days} days</span>}
               <span>Timing consistency: {Math.round(cadence.consistency_score * 100)}%</span>
+              {cadence.label && <span>Direct matches: {cadence.direct_match_count} ({Math.round(cadence.direct_match_ratio * 100)}%)</span>}
+              {cadence.label && <span>Skipped-cycle matches: {cadence.skipped_match_count}</span>}
+              {cadence.label && <span>Outliers: {cadence.outlier_count}</span>}
+              {cadence.label && <span>Intervals explained: {Math.round(cadence.explained_ratio * 100)}%</span>}
+              {cadence.label && cadence.median_direct_deviation_days != null && <span>Median direct deviation: {cadence.median_direct_deviation_days} days</span>}
               <span>Typical amount: ${amount.typical_amount}</span>
               <span>Amount range: ${amount.min_amount}–${amount.max_amount}</span>
               <span>Relative amount variation: {Math.round(amount.relative_variation * 100)}%</span>
-              <span>Pattern: {group.activity.apparently_active ? "apparently active" : "apparently inactive"}</span>
+              <span>Charges within 5%: {Math.round(amount.within_five_percent_ratio * 100)}%</span>
+              <span>Exact amount matches: {Math.round(amount.exact_match_ratio * 100)}%</span>
+              <span>Pattern: {group.activity.apparently_active == null
+                ? "unavailable without a cadence"
+                : group.activity.apparently_active ? "apparently active" : "apparently inactive"}</span>
             </div>
             <ul style={styles.evidence}>
               {group.evidence.map((item, index) => (
