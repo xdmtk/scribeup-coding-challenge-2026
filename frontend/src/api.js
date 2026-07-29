@@ -12,4 +12,10 @@ export async function fetchTransactions(userId) {
   return r.json();
 }
 
+export async function fetchMerchantGroups(userId) {
+  const r = await fetch(`${BASE}/users/${userId}/merchant-groups/`);
+  if (!r.ok) throw new Error(`fetchMerchantGroups: ${r.status}`);
+  return r.json();
+}
+
 // TODO (candidate): add fetchSubscriptions(userId) once the endpoint exists.

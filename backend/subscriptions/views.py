@@ -1,10 +1,14 @@
 from django.http import JsonResponse
+from django.views.decorators.http import require_GET
 
+from .merchant_groups import group_transactions
 from .models import Transaction
 
 
 def list_user_transactions(request, user_id: int):
     txns = Transaction.objects.filter(user_id=user_id).order_by("-charged_at")
+    if not txns.exists():
+        return JsonResponse({"error": "User not found"}, status=404)
     data = [
         {
             "id": t.id,
@@ -16,6 +20,22 @@ def list_user_transactions(request, user_id: int):
         for t in txns
     ]
     return JsonResponse({"transactions": data})
+
+
+@require_GET
+def list_user_merchant_groups(request, user_id: int):
+    txns = list(Transaction.objects.filter(user_id=user_id).order_by("-charged_at"))
+    if not txns:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    repeated, one_off = group_transactions(txns)
+    return JsonResponse(
+        {
+            "user_id": user_id,
+            "repeated_merchants": repeated,
+            "likely_one_off_merchants": one_off,
+        }
+    )
 
 
 def list_users(request):
