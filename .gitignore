@@ -4,6 +4,7 @@ __pycache__/
 node_modules/
 dist/
 .DS_Store
+.idea/
 
 # NOTE: backend/db.sqlite3 is intentionally committed — the challenge ships a
 # pre-seeded database. Do not add it back to this ignore list.
