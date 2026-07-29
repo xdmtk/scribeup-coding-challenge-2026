@@ -31,11 +31,12 @@ class SubscriptionAuditCommandTests(TestCase):
         call_command("audit_subscription_detection", stdout=stdout, **options)
         return stdout.getvalue()
 
-    def test_default_includes_all_users_and_both_classifications(self):
+    def test_default_includes_all_users_and_all_classifications(self):
         output = self.run_command()
         self.assertIn("USER 1", output)
         self.assertIn("USER 2", output)
         self.assertIn("LIKELY SUBSCRIPTIONS", output)
+        self.assertIn("POSSIBLE SUBSCRIPTIONS", output)
         self.assertIn("UNLIKELY SUBSCRIPTIONS", output)
 
     def test_user_option_limits_output(self):
@@ -63,7 +64,8 @@ class SubscriptionAuditCommandTests(TestCase):
         with patch("subscriptions.management.commands.audit_subscription_detection.group_transactions") as grouping, \
              patch("subscriptions.management.commands.audit_subscription_detection.analyze_repeated_groups") as analysis:
             grouping.return_value = ([], [])
-            analysis.return_value = {"likely_subscriptions": [], "unlikely_subscriptions": []}
+            analysis.return_value = {"likely_subscriptions": [], "possible_subscriptions": [],
+                                     "unlikely_subscriptions": []}
             self.run_command()
             self.assertEqual(grouping.call_count, 2)
             self.assertEqual(analysis.call_count, 2)
@@ -81,11 +83,15 @@ class SubscriptionAuditReportingTests(TestCase):
             "merchant_variants": ["Example"], "transaction_count": count, "transactions": [],
             "classification": "likely" if confidence >= LIKELY_SUBSCRIPTION_THRESHOLD else "unlikely",
             "confidence_score": confidence,
+            "pattern_quality_score": .8, "evidence_strength_score": .4,
             "detected_cadence": {"label": cadence, "typical_interval_days": 365,
                 "intervals_days": [365], "consistency_score": consistency,
-                "target_interval_days": 365, "tolerance_days": 15},
+                "target_interval_days": 365, "tolerance_days": 15,
+                "direct_match_count": 1, "skipped_match_count": 0,
+                "direct_match_ratio": 1, "explained_ratio": 1},
             "amount_analysis": {"typical_amount": "10.00", "min_amount": "10.00",
-                "max_amount": "10.00", "relative_variation": 0, "consistency_score": 1},
+                "max_amount": "10.00", "relative_variation": 0, "consistency_score": 1,
+                "exact_match_ratio": 1},
             "activity": {"apparently_active": True, "days_since_last_charge": 0},
             "evidence": [{"type": "negative", "label": "No stable interval between charges"}]}
 
@@ -93,6 +99,7 @@ class SubscriptionAuditReportingTests(TestCase):
         close, far = self.item(.679), self.item(.61)
         far["normalized_merchant"] = far["display_merchant"] = "Far"
         report = build_report([{"user_id": 1, "likely_subscriptions": [],
+            "possible_subscriptions": [],
             "unlikely_subscriptions": [far, close]}], 4)
         self.assertEqual([item["display_merchant"] for item in report["borderline_cases"]], ["Example", "Far"])
 
@@ -105,6 +112,7 @@ class SubscriptionAuditReportingTests(TestCase):
     def test_text_group_format_is_stable(self):
         item = self.item()
         report = build_report([{"user_id": 4, "likely_subscriptions": [],
+            "possible_subscriptions": [],
             "unlikely_subscriptions": [item]}], 2)
         output = render_text(report)
         self.assertIn("confidence: 0.640", output)

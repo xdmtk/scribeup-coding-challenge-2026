@@ -4,7 +4,7 @@ import json
 from collections import OrderedDict
 
 from .subscription_analysis import (LIKELY_SUBSCRIPTION_THRESHOLD, MIN_CUSTOM_TRANSACTIONS,
-                                    MIN_DIRECT_MATCH_RATIO)
+                                    MIN_DIRECT_MATCH_RATIO, POSSIBLE_THREE_MIN_AMOUNT)
 
 
 NEGATIVE_INTERVAL_EVIDENCE = "No stable interval between charges"
@@ -24,12 +24,16 @@ def suspicious_reasons(item):
     reasons = []
     if cadence["label"] and _has_evidence(item, NEGATIVE_INTERVAL_EVIDENCE):
         reasons.append("cadence label conflicts with evidence")
-    if count == 2 and item["confidence_score"] >= .50:
+    if count == 2 and item["classification"] != "possible" and item["confidence_score"] >= .50:
         reasons.append("two observations with confidence >= 0.50")
     if item["classification"] == "likely" and cadence["consistency_score"] < .65:
         reasons.append("likely despite low timing consistency")
     if item["classification"] == "likely" and not cadence["label"]:
         reasons.append("likely with no detected cadence")
+    if item["classification"] == "likely" and count == 2:
+        reasons.append("likely with only two transactions")
+    if item["classification"] == "likely" and item.get("evidence_strength_score", 0) < .50:
+        reasons.append("likely with weak evidence strength")
     if (item["classification"] == "likely" and
             cadence.get("direct_match_ratio", 0) < MIN_DIRECT_MATCH_RATIO):
         reasons.append("likely despite low direct-match ratio")
@@ -46,6 +50,18 @@ def suspicious_reasons(item):
     if (cadence.get("explained_ratio", 0) >= .70 and
             cadence.get("direct_match_ratio", 0) < MIN_DIRECT_MATCH_RATIO):
         reasons.append("high explained ratio but low direct-match ratio")
+    if item["classification"] == "possible":
+        if not cadence["label"]:
+            reasons.append("possible with no cadence")
+        if cadence["label"] and cadence["label"].startswith("every_"):
+            reasons.append("possible based on a custom cadence")
+        if amount["consistency_score"] < POSSIBLE_THREE_MIN_AMOUNT:
+            reasons.append("possible without strong amount consistency")
+        if cadence.get("direct_match_count", 0) == 0 and cadence.get("skipped_match_count", 0):
+            reasons.append("possible supported only by skipped-cycle timing")
+    if (item["classification"] == "unlikely" and item.get("pattern_quality_score", 0) >= .85
+            and count <= 3):
+        reasons.append("unlikely with very high pattern quality but sparse history")
     if abs(item["confidence_score"] - LIKELY_SUBSCRIPTION_THRESHOLD) <= .05:
         reasons.append("confidence within 0.05 of threshold")
     return reasons
@@ -54,7 +70,8 @@ def suspicious_reasons(item):
 def build_report(users, total_transactions):
     """Build deterministic aggregate and review sections from analyzed users."""
     rows = [(user["user_id"], item) for user in users for category in
-            ("likely_subscriptions", "unlikely_subscriptions") for item in user[category]]
+            ("likely_subscriptions", "possible_subscriptions", "unlikely_subscriptions")
+            for item in user[category]]
     items = [item for _, item in rows]
     contradictions = sum(bool(item["detected_cadence"]["label"]) and
                          _has_evidence(item, NEGATIVE_INTERVAL_EVIDENCE) for item in items)
@@ -64,9 +81,16 @@ def build_report(users, total_transactions):
         ("total_users", len(users)), ("total_transactions", total_transactions),
         ("total_repeated_merchant_groups", len(items)),
         ("total_likely_subscriptions", sum(i["classification"] == "likely" for i in items)),
+        ("total_possible_subscriptions", sum(i["classification"] == "possible" for i in items)),
         ("total_unlikely_subscriptions", sum(i["classification"] == "unlikely" for i in items)),
         ("groups_with_exactly_two_transactions", sum(i["transaction_count"] == 2 for i in items)),
         ("likely_with_exactly_two_transactions", sum(i["classification"] == "likely" and i["transaction_count"] == 2 for i in items)),
+        ("possible_with_exactly_two_transactions", sum(i["classification"] == "possible" and i["transaction_count"] == 2 for i in items)),
+        ("possible_with_exactly_three_transactions", sum(i["classification"] == "possible" and i["transaction_count"] == 3 for i in items)),
+        ("possible_with_no_cadence", sum(i["classification"] == "possible" and not i["detected_cadence"]["label"] for i in items)),
+        ("possible_based_on_custom_cadence", sum(bool(i["classification"] == "possible" and i["detected_cadence"]["label"] and i["detected_cadence"]["label"].startswith("every_")) for i in items)),
+        ("possible_with_non_identical_amounts", sum(i["classification"] == "possible" and i["amount_analysis"]["exact_match_ratio"] < 1 for i in items)),
+        ("possible_but_apparently_inactive", sum(i["classification"] == "possible" and i["activity"]["apparently_active"] is False for i in items)),
         ("cadence_evidence_contradictions", contradictions),
         ("likely_with_no_detected_cadence", sum(i["classification"] == "likely" and not i["detected_cadence"]["label"] for i in items)),
         ("custom_cadences_with_insufficient_observations", sum(bool(i["detected_cadence"]["label"] and i["detected_cadence"]["label"].startswith("every_") and i["transaction_count"] < MIN_CUSTOM_TRANSACTIONS) for i in items)),
@@ -106,6 +130,8 @@ def _render_group(item, index, max_transactions):
     shown = transactions[:max_transactions] if max_transactions is not None else transactions
     lines = [f"[{index}] {item['display_merchant']}",
              f"classification: {item['classification']}", f"confidence: {item['confidence_score']:.3f}",
+             f"pattern_quality: {item.get('pattern_quality_score', 0):.3f}",
+             f"evidence_strength: {item.get('evidence_strength_score', 0):.3f}",
              f"transactions: {item['transaction_count']}",
              f"normalized_merchant: {item['normalized_merchant']}"]
     if len(item["merchant_variants"]) > 1:
@@ -152,6 +178,7 @@ def render_text(report, borderline_only=False, max_transactions=None):
         for user in report["users"]:
             lines += ["", "=" * 60, f"USER {user['user_id']}", "=" * 60]
             for key, heading in (("likely_subscriptions", "LIKELY SUBSCRIPTIONS"),
+                                 ("possible_subscriptions", "POSSIBLE SUBSCRIPTIONS"),
                                  ("unlikely_subscriptions", "UNLIKELY SUBSCRIPTIONS")):
                 lines += ["", heading, ""]
                 if not user[key]: lines.append("None")

@@ -71,7 +71,9 @@ class MerchantGroupsEndpointTests(TestCase):
         self.create_transaction(20, "Shared Name", 15)
 
         data = self.client.get("/users/19/merchant-groups/").json()
-        analyzed = data["subscription_analysis"]["unlikely_subscriptions"][0]
+        analysis = data["subscription_analysis"]
+        analyzed = (analysis["likely_subscriptions"] + analysis["possible_subscriptions"] +
+                    analysis["unlikely_subscriptions"])[0]
 
         self.assertEqual(analyzed["transaction_count"], 2)
         self.assertEqual({item["id"] for item in analyzed["transactions"]}, {1, 2})
@@ -129,9 +131,9 @@ class SubscriptionAnalysisTests(TestCase):
         )
         self.assertGreater(stable_timing["confidence_score"], irregular_timing["confidence_score"])
 
-    def test_two_transactions_are_capped_below_likely_threshold(self):
+    def test_two_identical_monthly_transactions_are_possible_but_not_likely(self):
         result = self.analyze([date(2026, 6, 15), date(2026, 7, 15)])
-        self.assertEqual(result["classification"], "unlikely")
+        self.assertEqual(result["classification"], "possible")
         self.assertLessEqual(result["confidence_score"], 0.64)
 
     def test_more_observations_increase_confidence(self):
@@ -221,3 +223,50 @@ class SubscriptionAnalysisTests(TestCase):
         result = self.analyze([date(2026, month, 15) for month in range(2, 8)])
         labels = [item["label"] for item in result["evidence"]]
         self.assertNotIn("No stable interval between charges", labels)
+
+    def test_two_identical_yearly_charges_are_possible(self):
+        result = self.analyze([date(2025, 7, 15), date(2026, 7, 15)], ["100", "100"])
+        self.assertEqual(result["classification"], "possible")
+        self.assertEqual(result["detected_cadence"]["label"], "yearly")
+        self.assertIn("More history is needed to confirm recurrence",
+                      [item["label"] for item in result["evidence"]])
+        self.assertFalse(any("Stable" in item["label"] for item in result["evidence"]))
+
+    def test_two_variable_yearly_purchases_are_unlikely(self):
+        result = self.analyze([date(2025, 7, 15), date(2026, 7, 15)], ["100", "125"])
+        self.assertEqual(result["classification"], "unlikely")
+
+    def test_two_identical_charges_without_named_cadence_are_unlikely(self):
+        result = self.analyze([date(2026, 6, 5), date(2026, 7, 15)])
+        self.assertEqual(result["classification"], "unlikely")
+        self.assertIsNone(result["detected_cadence"]["label"])
+
+    def test_two_charges_supported_only_as_skip_are_unlikely(self):
+        # A 52-day interval can be explained as two monthly cycles, but has no
+        # direct cadence support and therefore cannot be possible.
+        result = self.analyze([date(2026, 5, 24), date(2026, 7, 15)])
+        self.assertEqual(result["classification"], "unlikely")
+
+    def test_three_loose_semiannual_charges_are_possible(self):
+        result = self.analyze([date(2025, 7, 10), date(2026, 1, 19), date(2026, 7, 15)])
+        self.assertEqual(result["detected_cadence"]["label"], "semiannual")
+        self.assertEqual(result["classification"], "possible")
+
+    def test_three_variable_semiannual_charges_are_unlikely(self):
+        result = self.analyze(
+            [date(2025, 7, 10), date(2026, 1, 19), date(2026, 7, 15)],
+            ["109", "145", "82"],
+        )
+        self.assertEqual(result["classification"], "unlikely")
+
+    def test_sparse_evidence_strength_increases_with_an_observation(self):
+        two = self.analyze([date(2025, 7, 15), date(2026, 7, 15)])
+        three = self.analyze([date(2025, 7, 10), date(2026, 1, 19), date(2026, 7, 15)])
+        long = self.analyze([date(2026, month, 15) for month in range(2, 8)])
+        self.assertLess(two["evidence_strength_score"], three["evidence_strength_score"])
+        self.assertLess(three["evidence_strength_score"], long["evidence_strength_score"])
+        for result in (two, three, long):
+            self.assertGreaterEqual(result["pattern_quality_score"], 0)
+            self.assertLessEqual(result["pattern_quality_score"], 1)
+            self.assertGreaterEqual(result["evidence_strength_score"], 0)
+            self.assertLessEqual(result["evidence_strength_score"], 1)

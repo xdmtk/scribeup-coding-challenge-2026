@@ -60,3 +60,17 @@ combines bounded day intervals with calendar alignment. Amount evidence now cons
 matches, coverage near the median, median deviation, and the maximum deviation. Custom cadences
 require at least five transactions, and hard timing/history eligibility gates prevent amount,
 history, or activity alone from creating a likely classification.
+
+## Step 4: Sparse recurring candidates and evidence strength
+
+The improved cadence detector handled long transaction histories well, but sparse and compelling
+patterns were still forced into `unlikely`. This iteration separates **pattern quality** (how well
+timing and amounts fit) from **evidence quantity** (how many direct observations and how much history
+support that fit). A `possible` result now represents strong structural evidence for a named cadence
+with insufficient history to establish recurrence confidently; the stricter `likely` gates remain in
+place.
+
+Sparse classification remains deterministic and offline. Two- and three-transaction candidates must
+pass explicit cadence, direct-match, amount-consistency, and activity rules, and custom cadences cannot
+qualify. These inspectable `possible` cases are also natural candidates for later semantic or LLM
+review, without adding such review to the current classifier.
