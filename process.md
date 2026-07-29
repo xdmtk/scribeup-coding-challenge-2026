@@ -14,3 +14,6 @@ calculated timing, amount, history, and activity details along with concise posi
 evidence, making the classification inspectable.
 
 This is an initial, deterministic heuristic—not a final or perfect subscription classifier.
+## Auditing the subscription heuristic across seeded users
+
+The existing deterministic heuristic is now audited across every seeded user before its scoring logic is changed. The audit is intended to expose possible false positives, false negatives, and borderline classifications in the supplied dataset. It reuses the exact merchant grouping and subscription-analysis code used by the UI, including each user's latest transaction date as the default reference date. Potentially suspicious results are highlighted for human review; a flag is diagnostic evidence, not an automatic conclusion that the algorithm failed. This phase is solely about validating current behavior against the supplied data.
