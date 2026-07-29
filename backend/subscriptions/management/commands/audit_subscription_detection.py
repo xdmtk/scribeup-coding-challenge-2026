@@ -16,7 +16,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--user", type=int)
         parser.add_argument("--min-confidence", type=float, default=0)
-        parser.add_argument("--classification", choices=("likely", "unlikely"))
+        parser.add_argument("--classification", choices=("likely", "possible", "unlikely"))
         parser.add_argument("--borderline-only", action="store_true")
         parser.add_argument("--format", choices=("text", "json"), default="text")
         parser.add_argument("--output")
@@ -51,7 +51,7 @@ class Command(BaseCommand):
             repeated, _ = group_transactions(user_transactions)
             reference = override or max(txn.charged_at.date() for txn in user_transactions)
             analysis = analyze_repeated_groups(repeated, reference)
-            for category in ("likely_subscriptions", "unlikely_subscriptions"):
+            for category in ("likely_subscriptions", "possible_subscriptions", "unlikely_subscriptions"):
                 analysis[category] = [item for item in analysis[category]
                                       if item["confidence_score"] >= options["min_confidence"] and
                                       (not options["classification"] or item["classification"] == options["classification"])]

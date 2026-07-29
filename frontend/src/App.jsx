@@ -136,7 +136,7 @@ function MerchantGroupsModal({ groups, loading, error, onClose }) {
         </div>
         <p style={styles.note}>{activeTab === "groups"
           ? "Repeated merchants are candidates for subscription detection. They are not yet confirmed subscriptions."
-          : "This is a heuristic classification based on timing, amount consistency, history, and recency. Repeated merchants are not automatically subscriptions."
+          : "This is a heuristic classification based on timing, amount consistency, history, and recency. Possible subscriptions have a strong recurring pattern but limited transaction history."
         }</p>
         <div style={styles.modalContent}>
           {loading && <div>Loading merchant groups…</div>}
@@ -151,6 +151,7 @@ function MerchantGroupsModal({ groups, loading, error, onClose }) {
           {groups && !empty && activeTab === "analysis" && (
             <>
               <SubscriptionSection title="Likely subscriptions" groups={groups.subscription_analysis.likely_subscriptions} />
+              <SubscriptionSection title="Possible subscriptions" groups={groups.subscription_analysis.possible_subscriptions} possible />
               <SubscriptionSection title="Unlikely subscriptions" groups={groups.subscription_analysis.unlikely_subscriptions} />
             </>
           )}
@@ -165,7 +166,7 @@ function TabButton({ selected, onClick, children }) {
     style={{ ...styles.tab, ...(selected ? styles.activeTab : {}) }}>{children}</button>;
 }
 
-function SubscriptionSection({ title, groups }) {
+function SubscriptionSection({ title, groups, possible = false }) {
   return (
     <section>
       <h3 style={styles.sectionTitle}>{title}</h3>
@@ -174,13 +175,17 @@ function SubscriptionSection({ title, groups }) {
         const cadence = group.detected_cadence;
         const amount = group.amount_analysis;
         return (
-          <details key={group.normalized_merchant} style={styles.group}>
+          <details key={group.normalized_merchant}
+            style={{ ...styles.group, ...(possible ? styles.possibleGroup : {}) }}>
             <summary style={styles.summary}>
-              <strong>{group.display_merchant}</strong> — {Math.round(group.confidence_score * 100)}%
+              <strong>{group.display_merchant}</strong> — {possible ? "possible — " : ""}{Math.round(group.confidence_score * 100)}%
               {cadence.label ? ` — ${cadence.label}` : ""} — typical ${amount.typical_amount} — {group.transaction_count} charge{group.transaction_count === 1 ? "" : "s"}
+              {possible ? " — limited history" : ""}
             </summary>
             <p style={styles.variants}>Variants: {group.merchant_variants.join(", ")}</p>
             <div style={styles.metrics}>
+              <span>Pattern quality: {Math.round(group.pattern_quality_score * 100)}%</span>
+              <span>Evidence strength: {Math.round(group.evidence_strength_score * 100)}%</span>
               <span>Observed intervals: {cadence.intervals_days.length ? `${cadence.intervals_days.join(", ")} days` : "not enough history"}</span>
               {cadence.label && <span>Typical interval: {cadence.typical_interval_days} days</span>}
               <span>Timing consistency: {Math.round(cadence.consistency_score * 100)}%</span>
@@ -273,6 +278,7 @@ const styles = {
   sectionTitle: { fontSize: 16, margin: "18px 0 8px" },
   muted: { color: "#666", fontSize: 14 },
   group: { borderTop: "1px solid #ddd", padding: "10px 2px" },
+  possibleGroup: { borderLeft: "3px solid #b7791f", background: "#fffaf0", paddingLeft: 8 },
   summary: { cursor: "pointer", fontSize: 14 },
   variants: { color: "#555", fontSize: 13, margin: "8px 0" },
   metrics: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 6, color: "#444", fontSize: 13, margin: "10px 0" },

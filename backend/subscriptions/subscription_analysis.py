@@ -16,6 +16,20 @@ MIN_TIMING_CONSISTENCY = 0.65
 MIN_CUSTOM_TRANSACTIONS = 5
 MIN_CUSTOM_DIRECT_RATIO = 0.75
 
+# Classification gates are deliberately separate from the compatibility score.
+# Sparse candidates must match one of these understood cadences; a fitted custom
+# interval is never sufficient evidence for ``possible``.
+NAMED_CADENCES = frozenset((
+    "weekly", "biweekly", "every four weeks", "monthly", "bimonthly",
+    "quarterly", "semiannual", "yearly",
+))
+POSSIBLE_TWO_MIN_TIMING = 0.75
+POSSIBLE_TWO_MIN_AMOUNT = 0.95
+POSSIBLE_THREE_MIN_TIMING = 0.60
+POSSIBLE_THREE_MIN_AMOUNT = 0.90
+LIKELY_THREE_MIN_TIMING = 0.87
+LIKELY_THREE_MIN_AMOUNT = 0.70
+
 # label, target days, direct-match tolerance. Monthly has calendar-specific rules.
 CADENCE_BUCKETS = (
     ("weekly", 7, 2),
@@ -24,7 +38,9 @@ CADENCE_BUCKETS = (
     ("monthly", 30, 5),
     ("bimonthly", 61, 5),
     ("quarterly", 91, 7),
-    ("semiannual", 182, 10),
+    # Twelve days accommodates processing drift around six-month renewals. Sparse
+    # eligibility still requires direct matches, so this cannot explain skips.
+    ("semiannual", 182, 12),
     ("yearly", 365, 15),
 )
 
@@ -206,11 +222,88 @@ def _activity(cadence, latest_date, reference_date):
     return .1, False, age
 
 
-def _evidence(cadence, amounts, count, active):
+def _pattern_quality(cadence, amounts):
+    """Structural fit, not a calibrated probability."""
+    return round(max(0, min(1,
+        .45 * cadence["consistency_score"] +
+        .25 * cadence["direct_match_ratio"] +
+        .10 * cadence["explained_ratio"] +
+        .20 * amounts["consistency_score"])), 3)
+
+
+def _evidence_strength(cadence, count, dates):
+    """Quantity of support: count 55%, intervals 20%, directness 15%, span 10%.
+
+    The count curve is intentionally conservative: 2=.25, 3=.40, 4=.60,
+    5=.72, then +.07 per observation to a maximum of 1.0.
+    """
+    count_support = {2: .25, 3: .40, 4: .60}.get(count, min(1, .72 + .07 * (count - 5)))
+    intervals = max(1, count - 1)
+    interval_support = min(1, intervals / 4)
+    direct_support = ((cadence["direct_match_count"] +
+                       .5 * cadence["skipped_match_count"]) / intervals
+                      if cadence["label"] else 0)
+    target = cadence["target_interval_days"]
+    duration_support = min(1, (dates[-1] - dates[0]).days / target) if target else 0
+    return round(max(0, min(1, .55 * count_support + .20 * interval_support +
+                             .15 * direct_support + .10 * duration_support)), 3)
+
+
+def _qualifies_for_likely(count, cadence, amounts, score):
+    base = (count >= 3 and cadence["label"] is not None
+            and cadence["consistency_score"] >= MIN_TIMING_CONSISTENCY
+            and cadence["direct_match_ratio"] >= MIN_DIRECT_MATCH_RATIO
+            and score >= LIKELY_SUBSCRIPTION_THRESHOLD)
+    if not base:
+        return False
+    if count >= 4:
+        return True
+    # Three observations are enough only when both intervals are direct and the
+    # cadence and amounts are exceptionally clean.
+    return (cadence["label"] in NAMED_CADENCES
+            and cadence["direct_match_ratio"] == 1.0
+            and cadence["explained_ratio"] == 1.0
+            and cadence["consistency_score"] >= LIKELY_THREE_MIN_TIMING
+            and amounts["consistency_score"] >= LIKELY_THREE_MIN_AMOUNT)
+
+
+def _qualifies_for_possible(count, cadence, amounts, active):
+    if cadence["label"] not in NAMED_CADENCES or active is False:
+        return False
+    if count == 2:
+        return (cadence["direct_match_count"] == 1
+                and cadence["skipped_match_count"] == 0
+                and cadence["direct_match_ratio"] == 1.0
+                and cadence["explained_ratio"] == 1.0
+                and cadence["consistency_score"] >= POSSIBLE_TWO_MIN_TIMING
+                and amounts["exact_match_ratio"] == 1.0
+                and amounts["consistency_score"] >= POSSIBLE_TWO_MIN_AMOUNT)
+    if count == 3:
+        nearly_identical = (amounts["within_five_percent_ratio"] == 1.0
+                            and amounts["maximum_relative_deviation"] <= .05)
+        return (cadence["direct_match_ratio"] >= .50
+                and cadence["explained_ratio"] == 1.0
+                and cadence["direct_match_count"] >= 1
+                and cadence["consistency_score"] >= POSSIBLE_THREE_MIN_TIMING
+                and nearly_identical
+                and amounts["consistency_score"] >= POSSIBLE_THREE_MIN_AMOUNT)
+    return False
+
+
+def _evidence(cadence, amounts, count, active, classification):
     messages = []
     if cadence["label"]:
-        messages.append({"type": "positive", "label": f"Stable {cadence['label']} cadence"})
-        if cadence["direct_match_ratio"] >= .75:
+        if classification == "possible":
+            if count == 2:
+                cadence_message = f"Observed interval directly matches a {cadence['label']} cadence"
+            elif cadence["direct_match_count"] == count - 1:
+                cadence_message = f"Both observed intervals support a {cadence['label']} cadence"
+            else:
+                cadence_message = f"Observed intervals are compatible with a {cadence['label']} cadence"
+            messages.append({"type": "positive", "label": cadence_message})
+        else:
+            messages.append({"type": "positive", "label": f"Stable {cadence['label']} cadence"})
+        if cadence["direct_match_ratio"] >= .75 and classification != "possible":
             messages.append({"type": "positive", "label": f"Most intervals match a {cadence['label']} cadence"})
         if cadence["skipped_match_count"]:
             noun = "interval may" if cadence["skipped_match_count"] == 1 else "intervals may"
@@ -227,6 +320,9 @@ def _evidence(cadence, amounts, count, active):
         messages.append({"type": "negative", "label": "Amounts vary substantially"})
     if count <= 3:
         messages.append({"type": "negative", "label": f"Only {count} observations are available"})
+        if classification == "possible":
+            messages.append({"type": "positive", "label": "Pattern quality is strong despite limited history"})
+            messages.append({"type": "negative", "label": "More history is needed to confirm recurrence"})
     elif count >= 5:
         messages.append({"type": "positive", "label": f"{count} historical transactions strongly support the pattern"})
     if active is not None:
@@ -249,15 +345,22 @@ def analyze_merchant_group(group, reference_date: date):
     if count == 2:
         score = min(score, .64)
     score = round(max(0, min(1, score)), 3)
-    eligible = (count >= 3 and cadence["label"] is not None
-                and cadence["consistency_score"] >= MIN_TIMING_CONSISTENCY
-                and cadence["direct_match_ratio"] >= MIN_DIRECT_MATCH_RATIO)
+    pattern_quality = _pattern_quality(cadence, amounts)
+    evidence_strength = _evidence_strength(cadence, count, dates)
+    if _qualifies_for_likely(count, cadence, amounts, score):
+        classification = "likely"
+    elif _qualifies_for_possible(count, cadence, amounts, active):
+        classification = "possible"
+    else:
+        classification = "unlikely"
     result = {key: value for key, value in group.items() if key != "_transaction_objects"}
     result.update({
-        "classification": "likely" if eligible and score >= LIKELY_SUBSCRIPTION_THRESHOLD else "unlikely",
-        "confidence_score": score, "detected_cadence": cadence, "amount_analysis": amounts,
+        "classification": classification, "confidence_score": score,
+        "pattern_quality_score": pattern_quality,
+        "evidence_strength_score": evidence_strength,
+        "detected_cadence": cadence, "amount_analysis": amounts,
         "activity": {"apparently_active": active, "days_since_last_charge": age},
-        "evidence": _evidence(cadence, amounts, count, active),
+        "evidence": _evidence(cadence, amounts, count, active, classification),
     })
     return result
 
@@ -266,6 +369,10 @@ def analyze_repeated_groups(groups, reference_date: date):
     analyzed = [analyze_merchant_group(group, reference_date) for group in groups]
     likely = sorted((item for item in analyzed if item["classification"] == "likely"),
                     key=lambda item: item["confidence_score"], reverse=True)
+    possible = sorted((item for item in analyzed if item["classification"] == "possible"),
+                      key=lambda item: (item["pattern_quality_score"], item["confidence_score"]),
+                      reverse=True)
     unlikely = sorted((item for item in analyzed if item["classification"] == "unlikely"),
                       key=lambda item: item["confidence_score"], reverse=True)
-    return {"likely_subscriptions": likely, "unlikely_subscriptions": unlikely}
+    return {"likely_subscriptions": likely, "possible_subscriptions": possible,
+            "unlikely_subscriptions": unlikely}
