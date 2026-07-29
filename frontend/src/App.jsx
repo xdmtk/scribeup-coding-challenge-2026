@@ -114,6 +114,7 @@ export default function App() {
 }
 
 function MerchantGroupsModal({ groups, loading, error, onClose }) {
+  const [activeTab, setActiveTab] = useState("groups");
   const empty =
     groups && !groups.repeated_merchants.length && !groups.likely_one_off_merchants.length;
   return (
@@ -129,22 +130,85 @@ function MerchantGroupsModal({ groups, loading, error, onClose }) {
           <h2 id="merchant-groups-title" style={styles.modalTitle}>Merchant Groups</h2>
           <button style={styles.closeButton} onClick={onClose} aria-label="Close">×</button>
         </div>
-        <p style={styles.note}>
-          Repeated merchants are candidates for subscription detection. They are not yet confirmed subscriptions.
-        </p>
+        <div style={styles.tabs} role="tablist" aria-label="Merchant analysis views">
+          <TabButton selected={activeTab === "groups"} onClick={() => setActiveTab("groups")}>Merchant Groups</TabButton>
+          <TabButton selected={activeTab === "analysis"} onClick={() => setActiveTab("analysis")}>Subscription Analysis</TabButton>
+        </div>
+        <p style={styles.note}>{activeTab === "groups"
+          ? "Repeated merchants are candidates for subscription detection. They are not yet confirmed subscriptions."
+          : "This is a heuristic classification based on timing, amount consistency, history, and recency. Repeated merchants are not automatically subscriptions."
+        }</p>
         <div style={styles.modalContent}>
           {loading && <div>Loading merchant groups…</div>}
           {error && <div style={styles.error}>Error: {error}</div>}
           {empty && <div>No merchant groups found for this user.</div>}
-          {groups && !empty && (
+          {groups && !empty && activeTab === "groups" && (
             <>
               <MerchantSection title="Repeated merchants" groups={groups.repeated_merchants} />
               <MerchantSection title="Likely one-off merchants" groups={groups.likely_one_off_merchants} />
             </>
           )}
+          {groups && !empty && activeTab === "analysis" && (
+            <>
+              <SubscriptionSection title="Likely subscriptions" groups={groups.subscription_analysis.likely_subscriptions} />
+              <SubscriptionSection title="Unlikely subscriptions" groups={groups.subscription_analysis.unlikely_subscriptions} />
+            </>
+          )}
         </div>
       </section>
     </div>
+  );
+}
+
+function TabButton({ selected, onClick, children }) {
+  return <button role="tab" aria-selected={selected} onClick={onClick}
+    style={{ ...styles.tab, ...(selected ? styles.activeTab : {}) }}>{children}</button>;
+}
+
+function SubscriptionSection({ title, groups }) {
+  return (
+    <section>
+      <h3 style={styles.sectionTitle}>{title}</h3>
+      {!groups.length && <p style={styles.muted}>None</p>}
+      {groups.map((group) => {
+        const cadence = group.detected_cadence;
+        const amount = group.amount_analysis;
+        return (
+          <details key={group.normalized_merchant} style={styles.group}>
+            <summary style={styles.summary}>
+              <strong>{group.display_merchant}</strong> — {Math.round(group.confidence_score * 100)}%
+              {cadence.label ? ` — ${cadence.label}` : ""} — typical ${amount.typical_amount} — {group.transaction_count} charge{group.transaction_count === 1 ? "" : "s"}
+            </summary>
+            <p style={styles.variants}>Variants: {group.merchant_variants.join(", ")}</p>
+            <div style={styles.metrics}>
+              <span>Observed intervals: {cadence.intervals_days.length ? `${cadence.intervals_days.join(", ")} days` : "not enough history"}</span>
+              <span>Typical interval: {cadence.typical_interval_days} days</span>
+              <span>Timing consistency: {Math.round(cadence.consistency_score * 100)}%</span>
+              <span>Typical amount: ${amount.typical_amount}</span>
+              <span>Amount range: ${amount.min_amount}–${amount.max_amount}</span>
+              <span>Relative amount variation: {Math.round(amount.relative_variation * 100)}%</span>
+              <span>Pattern: {group.activity.apparently_active ? "apparently active" : "apparently inactive"}</span>
+            </div>
+            <ul style={styles.evidence}>
+              {group.evidence.map((item, index) => (
+                <li key={`${item.type}-${index}`} style={item.type === "positive" ? styles.positive : styles.negative}>
+                  {item.type === "positive" ? "+" : "−"} {item.label}
+                </li>
+              ))}
+            </ul>
+            <div style={styles.transactionList}>
+              {group.transactions.map((transaction) => (
+                <div key={transaction.id} style={styles.groupTransaction}>
+                  <span>{transaction.charged_at.slice(0, 10)}</span>
+                  <span>{transaction.merchant_name}</span>
+                  <span style={styles.amount}>${transaction.amount}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </section>
   );
 }
 
@@ -192,6 +256,9 @@ const styles = {
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px 0" },
   modalTitle: { fontSize: 20, margin: 0 },
   closeButton: { border: 0, background: "transparent", fontSize: 28, lineHeight: 1, cursor: "pointer" },
+  tabs: { display: "flex", gap: 4, padding: "14px 18px 0", borderBottom: "1px solid #ddd" },
+  tab: { border: 0, borderBottom: "3px solid transparent", background: "transparent", padding: "8px 10px", cursor: "pointer", color: "#555", fontSize: 14 },
+  activeTab: { borderBottomColor: "#2463eb", color: "#111", fontWeight: 600 },
   note: { margin: "10px 18px", color: "#555", fontSize: 14 },
   modalContent: { overflowY: "auto", padding: "0 18px 18px" },
   sectionTitle: { fontSize: 16, margin: "18px 0 8px" },
@@ -199,6 +266,10 @@ const styles = {
   group: { borderTop: "1px solid #ddd", padding: "10px 2px" },
   summary: { cursor: "pointer", fontSize: 14 },
   variants: { color: "#555", fontSize: 13, margin: "8px 0" },
+  metrics: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 6, color: "#444", fontSize: 13, margin: "10px 0" },
+  evidence: { margin: "8px 0", paddingLeft: 22, fontSize: 13 },
+  positive: { color: "#176b37", marginBottom: 3 },
+  negative: { color: "#9b2c2c", marginBottom: 3 },
   transactionList: { marginTop: 8 },
   groupTransaction: { display: "grid", gridTemplateColumns: "minmax(90px, 0.8fr) minmax(120px, 2fr) minmax(70px, 0.6fr)", gap: 8, padding: "6px 4px", borderTop: "1px solid #f0f0f0", fontSize: 13 },
   amount: { textAlign: "right" },
