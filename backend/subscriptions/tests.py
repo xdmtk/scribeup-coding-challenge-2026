@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.test import TestCase
 
-from .merchant_groups import normalize_merchant
+from .merchant_groups import group_transactions, normalize_merchant
 from .models import Transaction
+from .subscription_analysis import analyze_merchant_group
 
 
 class MerchantNormalizationTests(TestCase):
@@ -62,3 +64,112 @@ class MerchantGroupsEndpointTests(TestCase):
         response = self.client.get("/users/999/merchant-groups/")
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"error": "User not found"})
+
+    def test_analysis_only_contains_requested_users_transactions(self):
+        self.create_transaction(19, "Shared Name", 1)
+        self.create_transaction(19, "Shared Name", 8)
+        self.create_transaction(20, "Shared Name", 15)
+
+        data = self.client.get("/users/19/merchant-groups/").json()
+        analyzed = data["subscription_analysis"]["unlikely_subscriptions"][0]
+
+        self.assertEqual(analyzed["transaction_count"], 2)
+        self.assertEqual({item["id"] for item in analyzed["transactions"]}, {1, 2})
+
+
+class SubscriptionAnalysisTests(TestCase):
+    reference_date = date(2026, 7, 15)
+
+    @staticmethod
+    def analyze(dates, amounts=None):
+        amounts = amounts or ["15.99"] * len(dates)
+        transactions = [
+            SimpleNamespace(
+                id=index,
+                user_id=1,
+                merchant_name="Example",
+                amount=Decimal(amount),
+                charged_at=datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc),
+                raw_payload={},
+            )
+            for index, (day, amount) in enumerate(zip(dates, amounts), 1)
+        ]
+        repeated, _ = group_transactions(transactions)
+        return analyze_merchant_group(repeated[0], SubscriptionAnalysisTests.reference_date)
+
+    def test_stable_monthly_amount_is_likely(self):
+        result = self.analyze([date(2026, month, 15) for month in range(2, 8)])
+        self.assertEqual(result["classification"], "likely")
+        self.assertEqual(result["detected_cadence"]["label"], "monthly")
+
+    def test_quarterly_with_modest_amount_changes_is_likely(self):
+        result = self.analyze(
+            [date(2025, 4, 15), date(2025, 7, 15), date(2025, 10, 14),
+             date(2026, 1, 15), date(2026, 4, 15), date(2026, 7, 15)],
+            ["170.70", "175.60", "182.27", "174.30", "180.10", "176.31"],
+        )
+        self.assertEqual(result["classification"], "likely")
+        self.assertEqual(result["detected_cadence"]["label"], "quarterly")
+
+    def test_irregular_variable_purchases_are_unlikely(self):
+        result = self.analyze(
+            [date(2026, 1, 1), date(2026, 1, 5), date(2026, 2, 20), date(2026, 6, 1), date(2026, 7, 15)],
+            ["15.00", "220.00", "84.00", "13.00", "146.00"],
+        )
+        self.assertEqual(result["classification"], "unlikely")
+        labels = [item["label"] for item in result["evidence"]]
+        self.assertIn("Amounts vary substantially", labels)
+
+    def test_timing_outweighs_amount_consistency(self):
+        dates = [date(2026, month, 15) for month in range(2, 8)]
+        stable_timing = self.analyze(dates, ["10", "18", "13", "20", "11", "17"])
+        irregular_timing = self.analyze(
+            [date(2026, 1, 1), date(2026, 1, 10), date(2026, 3, 20), date(2026, 7, 15)],
+            ["15"] * 4,
+        )
+        self.assertGreater(stable_timing["confidence_score"], irregular_timing["confidence_score"])
+
+    def test_two_transactions_are_capped_below_likely_threshold(self):
+        result = self.analyze([date(2026, 6, 15), date(2026, 7, 15)])
+        self.assertEqual(result["classification"], "unlikely")
+        self.assertLessEqual(result["confidence_score"], 0.64)
+
+    def test_more_observations_increase_confidence(self):
+        few = self.analyze([date(2026, 5, 15), date(2026, 6, 15), date(2026, 7, 15)])
+        many = self.analyze([date(2026, month, 15) for month in range(2, 8)])
+        self.assertGreater(many["confidence_score"], few["confidence_score"])
+
+    def test_skipped_month_still_supports_monthly(self):
+        result = self.analyze([
+            date(2026, 2, 15), date(2026, 3, 15), date(2026, 5, 15),
+            date(2026, 6, 15), date(2026, 7, 15),
+        ])
+        self.assertEqual(result["detected_cadence"]["label"], "monthly")
+        self.assertEqual(result["classification"], "likely")
+
+    def test_four_weeks_is_distinct_from_calendar_monthly(self):
+        four_weeks = self.analyze([
+            date(2026, 4, 22), date(2026, 5, 20), date(2026, 6, 17), date(2026, 7, 15),
+        ])
+        monthly = self.analyze([
+            date(2026, 4, 15), date(2026, 5, 15), date(2026, 6, 15), date(2026, 7, 15),
+        ])
+        self.assertEqual(four_weeks["detected_cadence"]["label"], "every four weeks")
+        self.assertEqual(monthly["detected_cadence"]["label"], "monthly")
+
+    def test_inactive_pattern_has_lower_confidence_and_evidence(self):
+        old = self.analyze([date(2024, month, 15) for month in range(1, 7)])
+        current = self.analyze([date(2026, month, 15) for month in range(2, 8)])
+        self.assertLess(old["confidence_score"], current["confidence_score"])
+        self.assertFalse(old["activity"]["apparently_active"])
+        self.assertIn("Pattern appears inactive", [item["label"] for item in old["evidence"]])
+
+    def test_evidence_and_score_are_explainable_and_bounded(self):
+        for result in (
+            self.analyze([date(2026, 5, 15), date(2026, 6, 15), date(2026, 7, 15)]),
+            self.analyze([date(2026, 1, 1), date(2026, 2, 20)], ["1", "100"]),
+        ):
+            self.assertGreaterEqual(result["confidence_score"], 0.0)
+            self.assertLessEqual(result["confidence_score"], 1.0)
+            self.assertTrue(result["evidence"])
+            self.assertTrue({item["type"] for item in result["evidence"]}.issubset({"positive", "negative"}))
