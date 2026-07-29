@@ -3,6 +3,7 @@ from django.views.decorators.http import require_GET
 
 from .merchant_groups import group_transactions
 from .models import Transaction
+from .subscription_analysis import analyze_repeated_groups
 
 
 def list_user_transactions(request, user_id: int):
@@ -29,11 +30,16 @@ def list_user_merchant_groups(request, user_id: int):
         return JsonResponse({"error": "User not found"}, status=404)
 
     repeated, one_off = group_transactions(txns)
+    reference_date = max(transaction.charged_at.date() for transaction in txns)
+    analysis = analyze_repeated_groups(repeated, reference_date)
+    for group in repeated:
+        del group["_transaction_objects"]
     return JsonResponse(
         {
             "user_id": user_id,
             "repeated_merchants": repeated,
             "likely_one_off_merchants": one_off,
+            "subscription_analysis": analysis,
         }
     )
 

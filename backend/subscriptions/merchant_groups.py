@@ -38,6 +38,7 @@ def group_transactions(transactions):
                     }
                     for transaction in merchant_transactions
                 ],
+                "_transaction_objects": merchant_transactions,
                 "_most_recent": merchant_transactions[0].charged_at,
             }
         )
@@ -46,6 +47,8 @@ def group_transactions(transactions):
     one_off = [group for group in groups if group["transaction_count"] == 1]
     repeated.sort(key=lambda group: (-group["transaction_count"], group["normalized_merchant"]))
     one_off.sort(key=lambda group: group["_most_recent"], reverse=True)
+    for group in one_off:
+        del group["_transaction_objects"]
     for group in groups:
         del group["_most_recent"]
 
