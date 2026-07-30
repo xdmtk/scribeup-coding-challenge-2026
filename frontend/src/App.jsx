@@ -161,7 +161,7 @@ function MerchantGroupsModal({ groups, loading, error, onClose }) {
         </div>
         <p style={styles.note}>{activeTab === "groups"
           ? "Repeated merchants are candidates for subscription detection. They are not yet confirmed subscriptions."
-          : "This is a heuristic classification based on timing, amount consistency, history, and recency. Possible subscriptions have a strong recurring pattern but limited transaction history."
+          : "Heuristic results remain deterministic even after semantic review. A possible label does not mean OpenAI did not run; stored final results are shown separately below."
         }</p>
         <div style={styles.modalContent}>
           {loading && <div>Loading merchant groups…</div>}
@@ -208,6 +208,15 @@ function SubscriptionSection({ title, groups, possible = false }) {
               {possible ? " — limited history" : ""}
             </summary>
             <p style={styles.variants}>Variants: {group.merchant_variants.join(", ")}</p>
+            <div style={styles.assessment}>
+              <strong>Heuristic result:</strong> {group.classification}
+              {group.final_assessment && <>
+                <span><strong>Final result:</strong> {group.final_assessment.final_classification.replaceAll("_", " ")}</span>
+                <span><strong>Assessment source:</strong> {group.final_assessment.assessment_source.replaceAll("_", " ")}</span>
+                <span><strong>LLM status:</strong> {group.final_assessment.llm_review_status.replaceAll("_", " ")}</span>
+                <span><strong>Last assessment update:</strong> {new Date(group.final_assessment.updated_at).toLocaleString()}</span>
+              </>}
+            </div>
             <div style={styles.metrics}>
               <span>Pattern quality: {Math.round(group.pattern_quality_score * 100)}%</span>
               <span>Evidence strength: {Math.round(group.evidence_strength_score * 100)}%</span>
@@ -306,6 +315,7 @@ const styles = {
   possibleGroup: { borderLeft: "3px solid #b7791f", background: "#fffaf0", paddingLeft: 8 },
   summary: { cursor: "pointer", fontSize: 14 },
   variants: { color: "#555", fontSize: 13, margin: "8px 0" },
+  assessment: { display: "grid", gap: 4, border: "1px solid #ddd", background: "#f8fafc", padding: 8, margin: "8px 0", fontSize: 13 },
   metrics: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 6, color: "#444", fontSize: 13, margin: "10px 0" },
   evidence: { margin: "8px 0", paddingLeft: 22, fontSize: 13 },
   positive: { color: "#176b37", marginBottom: 3 },

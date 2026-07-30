@@ -2,9 +2,14 @@
 
 import json
 import importlib
+import logging
 from dataclasses import dataclass
 
 from django.conf import settings
+
+from .versions import LLM_PROMPT_VERSION
+
+logger = logging.getLogger("subscriptions.semantic_review")
 
 
 CLASSIFICATIONS = {"subscription", "not_subscription", "uncertain"}
@@ -72,16 +77,31 @@ def _validate(payload):
                                     payload["merchant_type"], payload["reason"].strip())
 
 
-def review_subscription_candidate(group, heuristic_result):
+def review_subscription_candidate(group, heuristic_result, *, user_id=None):
     if not settings.OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not configured")
     client = importlib.import_module("openai").OpenAI(
         api_key=settings.OPENAI_API_KEY, timeout=settings.OPENAI_TIMEOUT_SECONDS)
+    evidence = build_review_input(group, heuristic_result)
+    logger.info(
+        "[SubscriptionReview][Request] user_id=%s merchant=%s model=%s "
+        "transaction_count=%s cadence=%s prompt_version=%s",
+        user_id, group["normalized_merchant"], settings.OPENAI_MODEL,
+        group["transaction_count"], evidence["cadence"] or "none", LLM_PROMPT_VERSION)
+    logger.debug("[SubscriptionReview][Evidence] user_id=%s merchant=%s evidence=%s",
+                 user_id, group["normalized_merchant"], evidence)
     response = client.responses.create(
         model=settings.OPENAI_MODEL, store=False,
         instructions=INSTRUCTIONS,
-        input=json.dumps(build_review_input(group, heuristic_result), sort_keys=True),
+        input=json.dumps(evidence, sort_keys=True),
         text={"format": {"type": "json_schema", "name": "subscription_review",
                          "strict": True, "schema": SCHEMA}},
     )
-    return _validate(json.loads(response.output_text))
+    result = _validate(json.loads(response.output_text))
+    request_id = getattr(response, "_request_id", None)
+    logger.info(
+        "[SubscriptionReview][Success] user_id=%s merchant=%s classification=%s "
+        "confidence=%s merchant_type=%s%s", user_id, group["normalized_merchant"],
+        result.classification, result.confidence, result.merchant_type,
+        f" request_id={request_id}" if request_id else "")
+    return result

@@ -89,6 +89,9 @@ assessments are reused and no new OpenAI call is made. Only missing or stale `po
 are reviewed again.
 
 If OpenAI review is disabled, unavailable, or fails, the ambiguous result remains `uncertain`
-rather than being promoted to a subscription. The final subscriptions endpoint is separate from
+rather than being promoted to a subscription. Semantic-review configuration, routing, persistence,
+and cache-validity reasons are observable via safe structured `subscriptions.semantic_review` logs
+and the read-only-capable `verify_subscription_review` management command. The diagnostic modal
+continues to show the deterministic heuristic and labels any persisted final assessment separately. The final subscriptions endpoint is separate from
 the diagnostic analysis UI, and LLM output remains stored separately from the deterministic
 heuristic evidence. No Redis, worker, or additional infrastructure is required for this dataset.
