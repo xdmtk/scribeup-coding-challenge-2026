@@ -78,8 +78,17 @@ review, without adding such review to the current classifier.
 ## Step 5: Versioned final assessments
 
 The deterministic heuristic remains primary. Strong `likely` and `unlikely` results finalize
-offline; only `possible` results receive selective semantic review. SQLite stores versioned,
-merchant-level snapshots, and canonical transaction fingerprints prevent repeated calls while
-limiting invalidation to changed merchants. No Redis or worker is needed for this dataset. The final
-subscriptions endpoint is separate from the diagnostic analysis UI, and LLM output remains separate
-from heuristic evidence.
+offline, while only `possible` results are sent to OpenAI for a narrow semantic review. The model
+receives the structured transaction evidence and decides whether the pattern is most consistent
+with a subscription, a repeat purchase, or an uncertain result.
+
+Final assessments are stored in SQLite at the user-and-merchant level. Each assessment includes a
+canonical fingerprint of the relevant transactions along with explicit heuristic, finalization,
+prompt, and model versions. When the finalized subscriptions endpoint is requested, unchanged
+assessments are reused and no new OpenAI call is made. Only missing or stale `possible` assessments
+are reviewed again.
+
+If OpenAI review is disabled, unavailable, or fails, the ambiguous result remains `uncertain`
+rather than being promoted to a subscription. The final subscriptions endpoint is separate from
+the diagnostic analysis UI, and LLM output remains stored separately from the deterministic
+heuristic evidence. No Redis, worker, or additional infrastructure is required for this dataset.
