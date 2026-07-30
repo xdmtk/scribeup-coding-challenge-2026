@@ -6,5 +6,5 @@ urlpatterns = [
     path("users/", views.list_users),
     path("users/<int:user_id>/transactions/", views.list_user_transactions),
     path("users/<int:user_id>/merchant-groups/", views.list_user_merchant_groups),
-    # TODO (candidate): add the subscription detection endpoint here.
+    path("users/<int:user_id>/subscriptions/", views.list_user_subscriptions),
 ]

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchMerchantGroups, fetchTransactions, fetchUsers } from "./api.js";
+import { fetchMerchantGroups, fetchSubscriptions, fetchTransactions, fetchUsers } from "./api.js";
 
 export default function App() {
   const [userIds, setUserIds] = useState([]);
@@ -11,6 +11,9 @@ export default function App() {
   const [merchantGroups, setMerchantGroups] = useState(null);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState(null);
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
+  const [subscriptionsError, setSubscriptionsError] = useState(null);
 
   useEffect(() => {
     fetchUsers()
@@ -29,6 +32,12 @@ export default function App() {
       .then((data) => setTransactions(data.transactions))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    setSubscriptionsLoading(true);
+    setSubscriptionsError(null);
+    fetchSubscriptions(selectedUser)
+      .then((data) => setSubscriptions(data.subscriptions))
+      .catch((e) => setSubscriptionsError(e.message))
+      .finally(() => setSubscriptionsLoading(false));
   }, [selectedUser]);
 
   useEffect(() => {
@@ -72,11 +81,27 @@ export default function App() {
           </select>
         </label>
         <button style={styles.button} disabled={selectedUser == null} onClick={openMerchantGroups}>
-          Current Subscriptions
+          Inspect Detection
         </button>
       </div>
 
-      {/* TODO (candidate): render detected subscriptions for the selected user here. */}
+      <h2 style={styles.h2}>Detected Subscriptions</h2>
+      {subscriptionsLoading && <div>Loading subscriptions…</div>}
+      {subscriptionsError && <div style={styles.error}>Error: {subscriptionsError}</div>}
+      {!subscriptionsLoading && !subscriptionsError && !subscriptions.length && (
+        <div style={styles.muted}>No finalized subscriptions detected.</div>
+      )}
+      {!subscriptionsLoading && !subscriptionsError && subscriptions.length > 0 && (
+        <table style={styles.table}>
+          <thead><tr><th style={styles.th}>Merchant</th><th style={styles.th}>Cadence</th>
+            <th style={styles.th}>Typical amount</th><th style={styles.th}>Next charge</th></tr></thead>
+          <tbody>{subscriptions.map((item) => <tr key={item.merchant}>
+            <td style={styles.td}>{item.merchant}</td><td style={styles.td}>{item.cadence}</td>
+            <td style={styles.td}>${item.typical_amount}</td>
+            <td style={styles.td}>{item.next_predicted_charge_date ?? "—"}</td>
+          </tr>)}</tbody>
+        </table>
+      )}
 
       <h2 style={styles.h2}>Transactions</h2>
       {loading && <div>Loading…</div>}
