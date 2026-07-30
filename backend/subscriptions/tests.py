@@ -20,6 +20,10 @@ class MerchantNormalizationTests(TestCase):
     def test_unrelated_names_remain_separate(self):
         self.assertNotEqual(normalize_merchant("Apple Store"), normalize_merchant("Applebee's"))
 
+    def test_url_punctuation_and_suffix_removal_are_conservative(self):
+        self.assertEqual(normalize_merchant("HTTPS://WWW.Example.COM"), "https www example")
+        self.assertNotEqual(normalize_merchant("Example Market"), normalize_merchant("Example Cafe"))
+
 
 class MerchantGroupsEndpointTests(TestCase):
     @staticmethod
@@ -59,6 +63,25 @@ class MerchantGroupsEndpointTests(TestCase):
 
         self.assertEqual(data["repeated_merchants"][0]["transaction_count"], 2)
         self.assertEqual(data["likely_one_off_merchants"][0]["display_merchant"], "Single")
+
+    def test_malformed_names_do_not_form_a_repeated_group(self):
+        self.create_transaction(21, "!!!", 1)
+        self.create_transaction(21, "   ", 2)
+
+        data = self.client.get("/users/21/merchant-groups/").json()
+
+        self.assertEqual(data["repeated_merchants"], [])
+        self.assertEqual(len(data["likely_one_off_merchants"]), 2)
+
+    def test_equal_timestamp_group_metadata_is_order_independent(self):
+        first = self.create_transaction(22, "Example Inc", 1)
+        second = self.create_transaction(22, "EXAMPLE.COM", 1)
+
+        forward, _ = group_transactions([first, second])
+        reverse, _ = group_transactions([second, first])
+
+        self.assertEqual(forward[0]["display_merchant"], reverse[0]["display_merchant"])
+        self.assertEqual(forward[0]["merchant_variants"], reverse[0]["merchant_variants"])
 
     def test_unknown_user_returns_not_found(self):
         response = self.client.get("/users/999/merchant-groups/")
@@ -158,6 +181,17 @@ class SubscriptionAnalysisTests(TestCase):
         ])
         self.assertEqual(four_weeks["detected_cadence"]["label"], "every four weeks")
         self.assertEqual(monthly["detected_cadence"]["label"], "monthly")
+
+    def test_month_end_leap_year_alignment_is_monthly(self):
+        result = self.analyze([
+            date(2024, 1, 31), date(2024, 2, 29), date(2024, 3, 31), date(2024, 4, 30),
+        ])
+        self.assertEqual(result["detected_cadence"]["label"], "monthly")
+
+    def test_duplicate_same_day_transactions_do_not_create_cadence(self):
+        result = self.analyze([date(2026, 7, 15)] * 4)
+        self.assertIsNone(result["detected_cadence"]["label"])
+        self.assertEqual(result["classification"], "unlikely")
 
     def test_inactive_pattern_has_lower_confidence_and_evidence(self):
         old = self.analyze([date(2024, month, 15) for month in range(1, 7)])

@@ -103,3 +103,20 @@ normalized monthly costs, readable subscription rows, and a focused recent-trans
 The deterministic diagnostic data and separately persisted final decisions are also easier to
 inspect through a structured, responsive detection-analysis dialog. This is a presentation-only
 iteration and does not change subscription detection behavior.
+
+
+## Engineering audit
+
+The feature was audited before UI polish. Merchant groups now have deterministic tie-breaking, and
+blank or punctuation-only descriptors remain isolated rather than being merged into a false repeat.
+OpenAI output is checked independently of the structured-output schema, including finite numeric
+confidence and non-empty reasons. Concurrent uniqueness-race fallback is accepted only when the
+winning row has the same fingerprint and versions. Frontend requests are guarded so a response for a
+previously selected user cannot replace current-user data.
+
+Call volume is bounded by the number of heuristic `possible` groups: likely and unlikely groups are
+always offline, and completed possible reviews are cached. A page load, model change, prompt change,
+or intentional force can make at most one call per possible group in scope. Failed reviews remain
+uncertain and retry on a later finalized request; persisted backoff would be appropriate at production
+scale. The verification command requires a merchant when forced so its interview-oriented path can
+make at most one call. Bulk force remains an explicit option on `finalize_subscriptions`.

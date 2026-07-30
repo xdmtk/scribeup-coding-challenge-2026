@@ -3,6 +3,8 @@
 import json
 import importlib
 import logging
+import math
+from numbers import Real
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -70,8 +72,12 @@ def _validate(payload):
         raise ValueError("OpenAI returned an invalid structured result")
     if payload["classification"] not in CLASSIFICATIONS or payload["merchant_type"] not in MERCHANT_TYPES:
         raise ValueError("OpenAI returned an unsupported classification")
-    confidence = float(payload["confidence"])
-    if not 0 <= confidence <= 1 or not isinstance(payload["reason"], str) or not payload["reason"].strip():
+    raw_confidence = payload["confidence"]
+    if (isinstance(raw_confidence, bool) or not isinstance(raw_confidence, Real)
+            or not math.isfinite(raw_confidence) or not 0 <= raw_confidence <= 1):
+        raise ValueError("OpenAI returned invalid confidence or reason")
+    confidence = float(raw_confidence)
+    if not isinstance(payload["reason"], str) or not payload["reason"].strip():
         raise ValueError("OpenAI returned invalid confidence or reason")
     return SubscriptionReviewResult(payload["classification"], confidence,
                                     payload["merchant_type"], payload["reason"].strip())

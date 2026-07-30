@@ -24,6 +24,8 @@ class Command(BaseCommand):
         parser.add_argument("--no-call", action="store_true")
 
     def handle(self, *args, **options):
+        if options["force"] and not options["merchant"]:
+            raise CommandError("--force requires --merchant to limit possible OpenAI calls")
         user_id = options["user"]
         txns = list(Transaction.objects.filter(user_id=user_id).order_by("charged_at", "id"))
         if not txns:
@@ -46,7 +48,7 @@ class Command(BaseCommand):
         self.stdout.write(f"API key configured: {yes(bool(settings.OPENAI_API_KEY))}")
         self.stdout.write(f"Model: {settings.OPENAI_MODEL}")
         self.stdout.write(f"Timeout: {settings.OPENAI_TIMEOUT_SECONDS:g} seconds")
-        self.stdout.write(f"Loaded .env: {settings.LOADED_ENV_PATH or 'none'}")
+        self.stdout.write(f"Loaded .env files: {settings.LOADED_ENV_PATH or 'none'}")
         reference = max(item.charged_at.date() for item in txns)
         selected_keys = set()
         for group in groups:
