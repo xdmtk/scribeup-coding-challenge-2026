@@ -95,3 +95,11 @@ and the read-only-capable `verify_subscription_review` management command. The d
 continues to show the deterministic heuristic and labels any persisted final assessment separately. The final subscriptions endpoint is separate from
 the diagnostic analysis UI, and LLM output remains stored separately from the deterministic
 heuristic evidence. No Redis, worker, or additional infrastructure is required for this dataset.
+
+## Step 6: Interview-ready dashboard presentation
+
+Finalized detection results are now presented in a compact dashboard with summary metrics,
+normalized monthly costs, readable subscription rows, and a focused recent-transactions view.
+The deterministic diagnostic data and separately persisted final decisions are also easier to
+inspect through a structured, responsive detection-analysis dialog. This is a presentation-only
+iteration and does not change subscription detection behavior.
