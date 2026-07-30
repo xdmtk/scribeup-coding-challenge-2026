@@ -16,7 +16,7 @@ class LocalEnvironmentTests(TestCase):
             root.write_text("OPENAI_MODEL=root-model\n")
             backend.write_text("OPENAI_MODEL=backend-model\nBACKEND_ONLY=yes\n")
             loaded = load_local_environments((root, backend))
-            self.assertEqual(loaded, str(root))
+            self.assertEqual(loaded, (str(root), str(backend)))
             self.assertEqual(os.environ["OPENAI_MODEL"], "root-model")
             self.assertEqual(os.environ["BACKEND_ONLY"], "yes")
 
@@ -26,7 +26,7 @@ class LocalEnvironmentTests(TestCase):
             backend = Path(directory) / "backend" / ".env"
             backend.parent.mkdir()
             backend.write_text("OPENAI_MODEL=backend-model\n")
-            self.assertEqual(load_local_environments((root, backend)), str(backend))
+            self.assertEqual(load_local_environments((root, backend)), (str(backend),))
             self.assertEqual(os.environ["OPENAI_MODEL"], "backend-model")
 
     def test_shell_environment_wins_and_boolean_parsing_is_safe(self):

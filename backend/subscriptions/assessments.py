@@ -31,7 +31,7 @@ def log_review_configuration():
     _config_logged = True
     logger.info(
         "[SubscriptionReview][Config] enabled=%s api_key_configured=%s model=%s "
-        "timeout_seconds=%s loaded_env=%s",
+        "timeout_seconds=%s loaded_env_paths=%s",
         _boolean(settings.OPENAI_SUBSCRIPTION_REVIEW_ENABLED),
         _boolean(settings.OPENAI_API_KEY), settings.OPENAI_MODEL,
         settings.OPENAI_TIMEOUT_SECONDS, settings.LOADED_ENV_PATH or "none")
@@ -205,6 +205,15 @@ def get_or_refresh_user_assessments(user_id, *, allow_llm=True, force=False,
                     user_id=user_id, normalized_merchant=key, defaults=defaults)
         except IntegrityError:
             row = SubscriptionAssessment.objects.get(user_id=user_id, normalized_merchant=key)
+            # A uniqueness race is safe to reuse only when the winning writer
+            # persisted the exact snapshot this request was about to write.
+            validation = validate_cached_assessment(
+                row, fingerprint, required, llm_enabled, force=False
+            )
+            if not validation.valid:
+                raise IntegrityError(
+                    f"Concurrent assessment is stale: {validation.reason}"
+                )
         logger.info("[SubscriptionAssessment][Persisted] user_id=%s merchant=%s "
                     "heuristic_classification=%s final_classification=%s "
                     "assessment_source=%s llm_status=%s", user_id, key,

@@ -18,19 +18,21 @@ def load_local_env(path):
 
 
 def load_local_environments(paths):
-    """Load paths in priority order and return the first file found."""
-    loaded = None
+    """Load paths in priority order and return every file that contributed."""
+    loaded = []
     for env_path in paths:
-        if load_local_env(env_path) and loaded is None:
-            loaded = str(env_path)
-    return loaded
+        if load_local_env(env_path):
+            loaded.append(str(env_path))
+    return tuple(loaded)
 
 
 def env_bool(name, default=False):
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
 
-LOADED_ENV_PATH = load_local_environments((BASE_DIR.parent / ".env", BASE_DIR / ".env"))
+LOADED_ENV_PATHS = load_local_environments((BASE_DIR.parent / ".env", BASE_DIR / ".env"))
+# Kept for compatibility with diagnostic code while reporting all loaded files.
+LOADED_ENV_PATH = ", ".join(LOADED_ENV_PATHS)
 
 SECRET_KEY = "dev-secret-not-for-prod"
 DEBUG = True

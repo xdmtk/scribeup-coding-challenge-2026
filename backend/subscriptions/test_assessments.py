@@ -2,10 +2,12 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.core.management import CommandError, call_command
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
-from .assessments import get_or_refresh_user_assessments, transaction_fingerprint
+from .assessments import (get_or_refresh_user_assessments, transaction_fingerprint,
+                          validate_cached_assessment)
 from .models import SubscriptionAssessment, Transaction
 from .prediction import predict_next_charge
 
@@ -85,6 +87,12 @@ class AssessmentPersistenceTests(TestCase):
         with self.assertRaises(IntegrityError):
             row.save()
 
+    def test_likely_finalizes_without_openai(self):
+        with patch("subscriptions.assessments.review_subscription_candidate") as review:
+            result = get_or_refresh_user_assessments(31, force=True)
+        review.assert_not_called()
+        self.assertEqual(result.assessments[0].final_classification, "subscription")
+
 
 @override_settings(OPENAI_SUBSCRIPTION_REVIEW_ENABLED=True, OPENAI_API_KEY="fake-test-key")
 class LlmRoutingTests(TestCase):
@@ -117,3 +125,48 @@ class LlmRoutingTests(TestCase):
             get_or_refresh_user_assessments(40)
         row = SubscriptionAssessment.objects.get()
         self.assertEqual((row.final_classification, row.llm_review_status), ("uncertain", "failed"))
+
+    @override_settings(OPENAI_API_KEY="")
+    def test_missing_key_is_misconfigured_and_uncertain(self):
+        with patch("subscriptions.assessments.review_subscription_candidate") as review:
+            get_or_refresh_user_assessments(40)
+        review.assert_not_called()
+        row = SubscriptionAssessment.objects.get()
+        self.assertEqual((row.final_classification, row.llm_review_status),
+                         ("uncertain", "misconfigured"))
+
+    def test_failed_review_retries_then_completed_result_is_cached(self):
+        success = type("Review", (), {"classification": "not_subscription", "confidence": .8,
+            "reason": "Repeat purchase.", "as_dict": lambda self: {
+                "classification": "not_subscription", "confidence": .8,
+                "merchant_type": "repeat_retail_purchase", "reason": "Repeat purchase."}})()
+        with patch("subscriptions.assessments.review_subscription_candidate",
+                   side_effect=[TimeoutError(), success]) as review:
+            get_or_refresh_user_assessments(40)
+            get_or_refresh_user_assessments(40)
+            get_or_refresh_user_assessments(40)
+        self.assertEqual(review.call_count, 2)
+        row = SubscriptionAssessment.objects.get()
+        self.assertEqual((row.final_classification, row.llm_review_status),
+                         ("not_subscription", "completed"))
+
+    @override_settings(OPENAI_SUBSCRIPTION_REVIEW_ENABLED=False)
+    def test_disabled_result_becomes_stale_when_review_is_enabled(self):
+        get_or_refresh_user_assessments(40)
+        row = SubscriptionAssessment.objects.get()
+        with override_settings(OPENAI_SUBSCRIPTION_REVIEW_ENABLED=True):
+            validation = validate_cached_assessment(
+                row, row.input_fingerprint, True, True
+            )
+        self.assertFalse(validation.valid)
+        self.assertEqual(validation.reason, "llm_review_not_completed")
+
+    def test_diagnostic_endpoint_never_invokes_review(self):
+        with patch("subscriptions.assessments.review_subscription_candidate") as review:
+            response = self.client.get("/users/40/merchant-groups/")
+        self.assertEqual(response.status_code, 200)
+        review.assert_not_called()
+
+    def test_verification_force_requires_merchant(self):
+        with self.assertRaisesRegex(CommandError, "--force requires --merchant"):
+            call_command("verify_subscription_review", user=40, force=True)

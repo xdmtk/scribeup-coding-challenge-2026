@@ -46,6 +46,11 @@ Each developer or reviewer should use their own key; do not share keys or commit
 or failed review leaves ambiguous cases `uncertain`. SQLite persists versioned assessments, so
 unchanged transaction groups are not reviewed repeatedly.
 
+Configuration precedence is **shell environment → repository-root `.env` → `backend/.env`**.
+Both files are loaded when present, with earlier sources retaining priority. Diagnostic output lists
+all files loaded but never their values. The simple loader supports blank lines, comments, quoted
+values, and the first `=` in a value; it intentionally is not a full shell-expression parser.
+
 ```bash
 cd backend
 python manage.py finalize_subscriptions --all-users
@@ -85,12 +90,33 @@ python manage.py finalize_subscriptions --all-users --force
 Add `--no-call` for guaranteed read-only diagnostics. The command and the
 `subscriptions.semantic_review` logger report only safe configuration booleans, routing decisions,
 cache-validity reasons, and outcomes; they never print the API key or request headers.
+For call-volume safety, `--force` requires an exact `--merchant`; use
+`finalize_subscriptions --all-users --force` when an intentional bulk refresh is required.
+
+A failed ambiguous review is stored as `uncertain` and retried the next time review is enabled and
+the finalized endpoint is requested. Successful reviews are reused until transactions or an
+explicit heuristic/finalization/prompt/model version changes. Repeated requests during a provider
+outage can therefore retry repeatedly; persisted exponential backoff is a production improvement,
+not additional infrastructure needed for this take-home.
 
 **Inspect Detection** intentionally shows deterministic heuristic classifications. A merchant can
 remain `possible` there after OpenAI review; any stored final classification and review status are
 shown separately in the modal. **Detected Subscriptions** shows only persisted assessments whose
 final classification is `subscription`. SQLite caching prevents repeated calls for unchanged,
 completed reviews.
+
+Amounts are analyzed with `Decimal` values. The supplied schema has no explicit refund/reversal
+relationship, so negative transactions are not silently matched to charges or discarded; mixed-sign
+groups naturally reduce amount consistency. Production ingestion should model reversal links before
+excluding refunds from recurrence evidence.
+
+### Development security scope
+
+The wildcard host/CORS settings, development secret, unauthenticated endpoints, and `DEBUG=True` are
+deliberate local take-home conveniences. A production deployment would use environment-managed
+secrets, restrictive hosts/CORS, authentication and authorization, `DEBUG=False`, rate limiting,
+retry backoff, and a server database. No API key, prompt, SDK response, or raw provider error is sent
+to the frontend or persisted as a final assessment.
 
 The database ships pre-seeded, so the data is identical for every candidate. Please don't delete or recreate `backend/db.sqlite3` — work against the data as given.
 

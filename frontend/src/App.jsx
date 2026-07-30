@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchMerchantGroups, fetchSubscriptions, fetchTransactions, fetchUsers } from "./api.js";
 
 export default function App() {
@@ -14,6 +14,7 @@ export default function App() {
   const [subscriptions, setSubscriptions] = useState([]);
   const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
   const [subscriptionsError, setSubscriptionsError] = useState(null);
+  const merchantGroupsRequest = useRef(0);
 
   useEffect(() => {
     fetchUsers()
@@ -26,18 +27,22 @@ export default function App() {
 
   useEffect(() => {
     if (selectedUser == null) return;
+    merchantGroupsRequest.current += 1;
+    setGroupsOpen(false);
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchTransactions(selectedUser)
+    fetchTransactions(selectedUser, controller.signal)
       .then((data) => setTransactions(data.transactions))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => { if (e.name !== "AbortError") setError(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     setSubscriptionsLoading(true);
     setSubscriptionsError(null);
-    fetchSubscriptions(selectedUser)
+    fetchSubscriptions(selectedUser, controller.signal)
       .then((data) => setSubscriptions(data.subscriptions))
-      .catch((e) => setSubscriptionsError(e.message))
-      .finally(() => setSubscriptionsLoading(false));
+      .catch((e) => { if (e.name !== "AbortError") setSubscriptionsError(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setSubscriptionsLoading(false); });
+    return () => controller.abort();
   }, [selectedUser]);
 
   useEffect(() => {
@@ -55,10 +60,17 @@ export default function App() {
     setGroupsLoading(true);
     setGroupsError(null);
     setMerchantGroups(null);
+    const requestId = ++merchantGroupsRequest.current;
     fetchMerchantGroups(selectedUser)
-      .then(setMerchantGroups)
-      .catch((e) => setGroupsError(e.message))
-      .finally(() => setGroupsLoading(false));
+      .then((data) => {
+        if (merchantGroupsRequest.current === requestId) setMerchantGroups(data);
+      })
+      .catch((e) => {
+        if (merchantGroupsRequest.current === requestId) setGroupsError(e.message);
+      })
+      .finally(() => {
+        if (merchantGroupsRequest.current === requestId) setGroupsLoading(false);
+      });
   };
 
   return (

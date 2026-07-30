@@ -16,11 +16,17 @@ def normalize_merchant(name: str) -> str:
 def group_transactions(transactions):
     grouped = defaultdict(list)
     for transaction in transactions:
-        grouped[normalize_merchant(transaction.merchant_name)].append(transaction)
+        normalized = normalize_merchant(transaction.merchant_name)
+        # A blank/punctuation-only descriptor contains no merchant identity. Keep it
+        # isolated instead of merging unrelated malformed rows into a fake repeat.
+        key = normalized or f"unknown-merchant-{transaction.id}"
+        grouped[key].append(transaction)
 
     groups = []
     for normalized_merchant, merchant_transactions in grouped.items():
-        merchant_transactions.sort(key=lambda transaction: transaction.charged_at, reverse=True)
+        merchant_transactions.sort(
+            key=lambda transaction: (transaction.charged_at, transaction.id), reverse=True
+        )
         variants = list(dict.fromkeys(transaction.merchant_name for transaction in merchant_transactions))
         groups.append(
             {

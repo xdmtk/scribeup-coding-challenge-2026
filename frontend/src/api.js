@@ -6,20 +6,20 @@ export async function fetchUsers() {
   return r.json();
 }
 
-export async function fetchTransactions(userId) {
-  const r = await fetch(`${BASE}/users/${userId}/transactions/`);
+export async function fetchTransactions(userId, signal) {
+  const r = await fetch(`${BASE}/users/${userId}/transactions/`, { signal });
   if (!r.ok) throw new Error(`fetchTransactions: ${r.status}`);
   return r.json();
 }
 
-export async function fetchMerchantGroups(userId) {
-  const r = await fetch(`${BASE}/users/${userId}/merchant-groups/`);
+export async function fetchMerchantGroups(userId, signal) {
+  const r = await fetch(`${BASE}/users/${userId}/merchant-groups/`, { signal });
   if (!r.ok) throw new Error(`fetchMerchantGroups: ${r.status}`);
   return r.json();
 }
 
-export async function fetchSubscriptions(userId) {
-  const r = await fetch(`${BASE}/users/${userId}/subscriptions/`);
+export async function fetchSubscriptions(userId, signal) {
+  const r = await fetch(`${BASE}/users/${userId}/subscriptions/`, { signal });
   if (!r.ok) throw new Error(`fetchSubscriptions: ${r.status}`);
   return r.json();
 }
