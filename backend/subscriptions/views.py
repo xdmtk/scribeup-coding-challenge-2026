@@ -2,6 +2,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
 from .merchant_groups import group_transactions
+from .assessments import get_or_refresh_user_assessments
 from .models import Transaction
 from .subscription_analysis import analyze_repeated_groups
 
@@ -49,3 +50,31 @@ def list_users(request):
         Transaction.objects.values_list("user_id", flat=True).distinct().order_by("user_id")
     )
     return JsonResponse({"user_ids": list(user_ids)})
+
+
+@require_GET
+def list_user_subscriptions(request, user_id: int):
+    result = get_or_refresh_user_assessments(user_id)
+    if result is None:
+        return JsonResponse({"error": "User not found"}, status=404)
+    subscriptions = [{
+        "merchant": row.display_merchant,
+        "cadence": row.cadence,
+        "typical_amount": f"{row.typical_amount:.2f}",
+        "next_predicted_charge_date": (
+            row.next_predicted_charge_date.isoformat() if row.next_predicted_charge_date else None
+        ),
+        "confidence": row.final_confidence,
+        "assessment_source": row.assessment_source,
+    } for row in result.assessments if row.final_classification == "subscription"]
+    stats = result.stats
+    return JsonResponse({
+        "user_id": user_id, "subscriptions": subscriptions,
+        "metadata": {
+            "assessment_count": len(result.assessments),
+            "subscription_count": len(subscriptions),
+            "llm_reviews_used": stats.llm_reviews_completed,
+            "cached_assessments_reused": stats.cached_assessments_reused,
+            "stale_assessments_refreshed": stats.stale_assessments_refreshed,
+        },
+    })

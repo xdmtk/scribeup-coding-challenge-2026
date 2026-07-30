@@ -1,6 +1,23 @@
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def load_local_env(path):
+    """Load simple KEY=VALUE development settings without overriding the shell."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_local_env(BASE_DIR.parent / ".env")
+load_local_env(BASE_DIR / ".env")
 
 SECRET_KEY = "dev-secret-not-for-prod"
 DEBUG = True
@@ -35,3 +52,10 @@ TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_SUBSCRIPTION_REVIEW_ENABLED = os.getenv(
+    "OPENAI_SUBSCRIPTION_REVIEW_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))

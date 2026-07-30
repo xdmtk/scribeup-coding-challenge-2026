@@ -20,7 +20,8 @@ You'll need: Python 3.11+ and Node 20+.
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python manage.py migrate    # no-op; the shipped db.sqlite3 is already migrated + seeded
+python manage.py migrate
+python manage.py finalize_subscriptions --all-users
 python manage.py runserver
 
 # Frontend (in another terminal)
@@ -31,12 +32,35 @@ npm run dev
 
 Backend runs on `http://localhost:8000`, frontend on `http://localhost:5173`.
 
+### Optional semantic review
+
+Deterministic analysis works without OpenAI. To opt into review of only ambiguous candidates:
+
+```bash
+cp .env.example .env
+# Set OPENAI_API_KEY=your-own-key and OPENAI_SUBSCRIPTION_REVIEW_ENABLED=true
+```
+
+Each developer or reviewer should use their own key; do not share keys or commit `.env`. The model
+(default `gpt-5-mini`) and timeout are configurable. Calls happen only in Django. Missing, disabled,
+or failed review leaves ambiguous cases `uncertain`. SQLite persists versioned assessments, so
+unchanged transaction groups are not reviewed repeatedly.
+
+```bash
+cd backend
+python manage.py finalize_subscriptions --all-users
+python manage.py finalize_subscriptions --user 17
+python manage.py finalize_subscriptions --all-users --no-llm
+python manage.py finalize_subscriptions --all-users --force
+```
+
 The database ships pre-seeded, so the data is identical for every candidate. Please don't delete or recreate `backend/db.sqlite3` — work against the data as given.
 
 ## What's already wired up
 
 - `GET /users/` — returns the list of seeded user IDs.
 - `GET /users/<user_id>/transactions/` — returns all transactions for a user. The React page calls this.
+- `GET /users/<user_id>/subscriptions/` — refreshes stale snapshots and returns finalized subscriptions.
 - The React page has a user selector and a simple transaction list.
 
 ## The prompt

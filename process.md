@@ -74,3 +74,12 @@ Sparse classification remains deterministic and offline. Two- and three-transact
 pass explicit cadence, direct-match, amount-consistency, and activity rules, and custom cadences cannot
 qualify. These inspectable `possible` cases are also natural candidates for later semantic or LLM
 review, without adding such review to the current classifier.
+
+## Step 5: Versioned final assessments
+
+The deterministic heuristic remains primary. Strong `likely` and `unlikely` results finalize
+offline; only `possible` results receive selective semantic review. SQLite stores versioned,
+merchant-level snapshots, and canonical transaction fingerprints prevent repeated calls while
+limiting invalidation to changed merchants. No Redis or worker is needed for this dataset. The final
+subscriptions endpoint is separate from the diagnostic analysis UI, and LLM output remains separate
+from heuristic evidence.
