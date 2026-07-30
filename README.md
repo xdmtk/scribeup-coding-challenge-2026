@@ -54,6 +54,44 @@ python manage.py finalize_subscriptions --all-users --no-llm
 python manage.py finalize_subscriptions --all-users --force
 ```
 
+### Verify semantic review
+
+1. Confirm the repository-root or `backend/.env` includes:
+
+   ```dotenv
+   OPENAI_API_KEY=...
+   OPENAI_SUBSCRIPTION_REVIEW_ENABLED=true
+   ```
+
+2. Restart Django so settings are reloaded.
+3. Inspect configuration, routing, and the cached assessment without making a call:
+
+   ```bash
+   python manage.py verify_subscription_review \
+     --user 1 \
+     --merchant "Costco Membership"
+   ```
+
+4. Force one review when needed (this may make one real API request when review is enabled and
+   configured):
+
+   ```bash
+   python manage.py verify_subscription_review \
+     --user 1 \
+     --merchant "Costco Membership" \
+     --force
+   ```
+
+Add `--no-call` for guaranteed read-only diagnostics. The command and the
+`subscriptions.semantic_review` logger report only safe configuration booleans, routing decisions,
+cache-validity reasons, and outcomes; they never print the API key or request headers.
+
+**Inspect Detection** intentionally shows deterministic heuristic classifications. A merchant can
+remain `possible` there after OpenAI review; any stored final classification and review status are
+shown separately in the modal. **Detected Subscriptions** shows only persisted assessments whose
+final classification is `subscription`. SQLite caching prevents repeated calls for unchanged,
+completed reviews.
+
 The database ships pre-seeded, so the data is identical for every candidate. Please don't delete or recreate `backend/db.sqlite3` — work against the data as given.
 
 ## What's already wired up

@@ -37,6 +37,12 @@ class Command(BaseCommand):
                 totals[key] += getattr(result.stats, key)
             for row in result.assessments:
                 classifications[row.final_classification] += 1
+                if options["verbosity"] >= 2:
+                    self.stdout.write(
+                        f"user={user_id} merchant={row.normalized_merchant} "
+                        f"heuristic={row.heuristic_classification} final={row.final_classification} "
+                        f"source={row.assessment_source} llm_status={row.llm_review_status}"
+                    )
         self.stdout.write(f"users processed: {processed}")
         for key, value in totals.items():
             self.stdout.write(f"{key.replace('_', ' ')}: {value}")

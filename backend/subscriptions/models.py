@@ -17,7 +17,8 @@ class Transaction(models.Model):
 
 class SubscriptionAssessment(models.Model):
     REVIEW_STATUSES = [(value, value.replace("_", " ").title()) for value in
-                       ("not_required", "pending", "completed", "failed", "disabled")]
+                       ("not_required", "pending", "completed", "failed", "disabled",
+                        "misconfigured")]
     FINAL_CLASSIFICATIONS = [(value, value.replace("_", " ").title()) for value in
                              ("subscription", "not_subscription", "uncertain")]
     SOURCES = [(value, value.replace("_", " ").title()) for value in

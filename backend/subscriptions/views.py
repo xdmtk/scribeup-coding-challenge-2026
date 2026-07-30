@@ -3,7 +3,7 @@ from django.views.decorators.http import require_GET
 
 from .merchant_groups import group_transactions
 from .assessments import get_or_refresh_user_assessments
-from .models import Transaction
+from .models import SubscriptionAssessment, Transaction
 from .subscription_analysis import analyze_repeated_groups
 
 
@@ -33,6 +33,20 @@ def list_user_merchant_groups(request, user_id: int):
     repeated, one_off = group_transactions(txns)
     reference_date = max(transaction.charged_at.date() for transaction in txns)
     analysis = analyze_repeated_groups(repeated, reference_date)
+    assessments = {row.normalized_merchant: row for row in
+                   SubscriptionAssessment.objects.filter(user_id=user_id)}
+    # This endpoint remains deterministic and never triggers a semantic review.  A stored final
+    # snapshot is included only to make the distinction visible to diagnostic clients.
+    for category in analysis.values():
+        for item in category:
+            row = assessments.get(item["normalized_merchant"])
+            if row:
+                item["final_assessment"] = {
+                    "final_classification": row.final_classification,
+                    "assessment_source": row.assessment_source,
+                    "llm_review_status": row.llm_review_status,
+                    "updated_at": row.updated_at.isoformat(),
+                }
     for group in repeated:
         del group["_transaction_objects"]
     return JsonResponse(
