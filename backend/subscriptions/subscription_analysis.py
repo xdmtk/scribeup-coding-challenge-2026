@@ -9,6 +9,8 @@ from statistics import median
 LIKELY_SUBSCRIPTION_THRESHOLD = 0.68
 SCORE_WEIGHTS = {"timing": 0.50, "amount": 0.30, "history": 0.15, "activity": 0.05}
 
+# Repetition makes a merchant worth analyzing, but recurrence is established by
+# the timing pattern; stable amounts merely strengthen that primary signal.
 # A returned cadence is a dominant cluster, not a requirement that every gap fit.
 MIN_DIRECT_MATCH_RATIO = 0.50
 MIN_EXPLAINED_RATIO = 0.70
@@ -19,10 +21,18 @@ MIN_CUSTOM_DIRECT_RATIO = 0.75
 # Classification gates are deliberately separate from the compatibility score.
 # Sparse candidates must match one of these understood cadences; a fitted custom
 # interval is never sufficient evidence for ``possible``.
-NAMED_CADENCES = frozenset((
-    "weekly", "biweekly", "every four weeks", "monthly", "bimonthly",
-    "quarterly", "semiannual", "yearly",
-))
+NAMED_CADENCES = frozenset(
+    (
+        "weekly",
+        "biweekly",
+        "every four weeks",
+        "monthly",
+        "bimonthly",
+        "quarterly",
+        "semiannual",
+        "yearly",
+    )
+)
 POSSIBLE_TWO_MIN_TIMING = 0.75
 POSSIBLE_TWO_MIN_AMOUNT = 0.95
 POSSIBLE_THREE_MIN_TIMING = 0.60
@@ -75,6 +85,8 @@ def _classify_interval(label, target, tolerance, interval, earlier, later):
 
 
 def _candidate_metrics(dates, label, target, tolerance):
+    # Direct matches represent the expected next cycle, skips represent two or
+    # three cycles, and every remaining interval is retained as an outlier.
     intervals = [(later - earlier).days for earlier, later in zip(dates, dates[1:])]
     matches = [_classify_interval(label, target, tolerance, interval, earlier, later)
                for interval, earlier, later in zip(intervals, dates, dates[1:])]
@@ -141,30 +153,50 @@ def _custom_candidate(intervals):
 
 
 def detect_cadence(dates):
+    # Compare all understood cadence families, then consider a custom interval
+    # only when the named candidates cannot explain enough of the history.
     intervals = [(later - earlier).days for earlier, later in zip(dates, dates[1:])]
     typical = int(round(median(intervals)))
     candidates = [_candidate_metrics(dates, *bucket) for bucket in CADENCE_BUCKETS]
-    eligible = [candidate for candidate in candidates
-                if candidate["direct_match_ratio"] >= MIN_DIRECT_MATCH_RATIO
-                and candidate["explained_ratio"] >= MIN_EXPLAINED_RATIO]
-    best = max(eligible, key=lambda candidate: (candidate["consistency_score"],
-                                                candidate["direct_match_ratio"]), default=None)
+    eligible = [
+        candidate
+        for candidate in candidates
+        if candidate["direct_match_ratio"] >= MIN_DIRECT_MATCH_RATIO
+        and candidate["explained_ratio"] >= MIN_EXPLAINED_RATIO
+    ]
+    best = max(
+        eligible,
+        key=lambda candidate: (
+            candidate["consistency_score"],
+            candidate["direct_match_ratio"]
+        ),
+        default=None
+    )
     custom_history_insufficient = False
+
     if best is None:
         if len(dates) >= MIN_CUSTOM_TRANSACTIONS:
             best = _custom_candidate(intervals)
         else:
             custom_history_insufficient = len(intervals) >= 2 and typical > 0
 
-    empty = {"direct_match_count": 0, "skipped_match_count": 0,
-             "two_cycle_skip_count": 0, "three_cycle_skip_count": 0,
-             "outlier_count": len(intervals), "direct_match_ratio": 0.0,
-             "explained_ratio": 0.0, "median_direct_deviation_days": None,
-             "consistency_score": 0.0}
+    empty = {
+        "direct_match_count": 0,
+        "skipped_match_count": 0,
+        "two_cycle_skip_count": 0,
+        "three_cycle_skip_count": 0,
+        "outlier_count": len(intervals),
+        "direct_match_ratio": 0.0,
+        "explained_ratio": 0.0,
+        "median_direct_deviation_days": None,
+        "consistency_score": 0.0
+    }
     metrics = best or empty
+
     return {
         "label": best["label"] if best else None,
-        "typical_interval_days": typical, "intervals_days": intervals,
+        "typical_interval_days": typical,
+        "intervals_days": intervals,
         "consistency_score": round(metrics["consistency_score"], 3),
         "target_interval_days": best["target"] if best else None,
         "tolerance_days": best["tolerance"] if best else None,
@@ -181,6 +213,8 @@ def detect_cadence(dates):
 
 
 def analyze_amounts(transactions):
+    # Amount regularity supports a cadence match, but cannot establish recurrence
+    # by itself when timing evidence is absent.
     amounts = [transaction.amount for transaction in transactions]
     typical = median(amounts)
     denominator = abs(typical)
@@ -332,27 +366,39 @@ def _evidence(cadence, amounts, count, active, classification):
 
 
 def analyze_merchant_group(group, reference_date: date):
+    # Compatibility combines the weighted signals used for classification;
+    # pattern quality describes structural fit, while evidence strength describes
+    # how much history supports that fit. Sparse, clean patterns can be possible
+    # without having enough evidence to be finalized as likely.
     transactions = sorted(group["_transaction_objects"], key=lambda transaction: transaction.charged_at)
     dates = [transaction.charged_at.date() for transaction in transactions]
     cadence, amounts = detect_cadence(dates), analyze_amounts(transactions)
     count = len(transactions)
     history_score = min(1.0, max(.2, (count - 1) / 5))
     activity_score, active, age = _activity(cadence, dates[-1], reference_date)
-    score = sum((SCORE_WEIGHTS["timing"] * cadence["consistency_score"],
-                 SCORE_WEIGHTS["amount"] * amounts["consistency_score"],
-                 SCORE_WEIGHTS["history"] * history_score,
-                 SCORE_WEIGHTS["activity"] * activity_score))
+    score = sum(
+        (
+            SCORE_WEIGHTS["timing"] * cadence["consistency_score"],
+            SCORE_WEIGHTS["amount"] * amounts["consistency_score"],
+            SCORE_WEIGHTS["history"] * history_score,
+            SCORE_WEIGHTS["activity"] * activity_score
+        )
+    )
+
     if count == 2:
         score = min(score, .64)
+
     score = round(max(0, min(1, score)), 3)
     pattern_quality = _pattern_quality(cadence, amounts)
     evidence_strength = _evidence_strength(cadence, count, dates)
+
     if _qualifies_for_likely(count, cadence, amounts, score):
         classification = "likely"
     elif _qualifies_for_possible(count, cadence, amounts, active):
         classification = "possible"
     else:
         classification = "unlikely"
+
     result = {key: value for key, value in group.items() if key != "_transaction_objects"}
     result.update({
         "classification": classification, "confidence_score": score,

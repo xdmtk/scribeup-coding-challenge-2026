@@ -14,6 +14,8 @@ def normalize_merchant(name: str) -> str:
 
 
 def group_transactions(transactions):
+    # Multiple charges only make a merchant a candidate. The downstream cadence
+    # analysis decides whether that repetition represents a subscription.
     grouped = defaultdict(list)
     for transaction in transactions:
         grouped[normalize_merchant(transaction.merchant_name)].append(transaction)
@@ -21,7 +23,12 @@ def group_transactions(transactions):
     groups = []
     for normalized_merchant, merchant_transactions in grouped.items():
         merchant_transactions.sort(key=lambda transaction: transaction.charged_at, reverse=True)
-        variants = list(dict.fromkeys(transaction.merchant_name for transaction in merchant_transactions))
+        variants = list(
+            dict.fromkeys(
+                transaction.merchant_name for transaction in merchant_transactions
+            )
+        )
+
         groups.append(
             {
                 "normalized_merchant": normalized_merchant,
@@ -43,12 +50,18 @@ def group_transactions(transactions):
             }
         )
 
+    # Keep repeated candidates separate from one-off activity before applying the
+    # existing presentation order and removing internal working fields.
     repeated = [group for group in groups if group["transaction_count"] >= 2]
     one_off = [group for group in groups if group["transaction_count"] == 1]
-    repeated.sort(key=lambda group: (-group["transaction_count"], group["normalized_merchant"]))
+    repeated.sort(
+        key=lambda group: (-group["transaction_count"], group["normalized_merchant"])
+    )
     one_off.sort(key=lambda group: group["_most_recent"], reverse=True)
+
     for group in one_off:
         del group["_transaction_objects"]
+
     for group in groups:
         del group["_most_recent"]
 
