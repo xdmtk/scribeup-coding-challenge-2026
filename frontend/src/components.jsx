@@ -1,21 +1,43 @@
 import { useMemo, useState } from "react";
 import { cadenceLabel, daysBetween, earliestNextCharge, formatCurrency, formatDate, monthlyEquivalent, parseDateOnly, titleize } from "./utils.js";
 
-const sourceLabels = { heuristic: "Deterministic", llm_review: "Semantic review", heuristic_fallback: "Needs review" };
+const sourceLabels = {
+  heuristic: "Deterministic",
+  llm_review: "Semantic review",
+  heuristic_fallback: "Needs review"
+};
 
 export function StatusBadge({ value, children }) {
   const normalized = String(value || "neutral").replaceAll("_", "-");
-  return <span className={`badge badge--${normalized}`}>{children ?? titleize(value)}</span>;
+  return <span className={`badge badge--${normalized}`}>
+    {children ?? titleize(value)}
+  </span>;
 }
 
 export function DashboardHeader({ userIds, selectedUser, onUserChange, onInspect }) {
   return <header className="dashboard-header">
-    <div><p className="eyebrow">ScribeUp Take-Home</p><h1>Subscription Intelligence</h1>
-      <p className="subtitle">Recurring charges detected from transaction history using deterministic analysis and selective semantic review.</p></div>
+    <div>
+      <p className="eyebrow">ScribeUp Take-Home</p>
+      <h1>Subscription Intelligence</h1>
+      <p className="subtitle">Recurring charges detected from transaction history using deterministic analysis and selective semantic review.</p>
+    </div>
     <div className="header-controls">
-      <label className="field"><span>User</span><select value={selectedUser ?? ""} onChange={(event) => onUserChange(Number(event.target.value))}>
-        {userIds.map((id) => <option key={id} value={id}>User {id}</option>)}</select></label>
-      <button className="button button--secondary" disabled={selectedUser == null} onClick={onInspect}>Inspect detection</button>
+      <label className="field">
+        <span>User</span>
+        <select
+          value={selectedUser ?? ""}
+          onChange={(event) => onUserChange(Number(event.target.value))}
+        >
+          {userIds.map((id) => <option key={id} value={id}>User {id}</option>)}
+        </select>
+      </label>
+      <button
+        className="button button--secondary"
+        disabled={selectedUser == null}
+        onClick={onInspect}
+      >
+        Inspect detection
+      </button>
     </div>
   </header>;
 }
@@ -32,7 +54,12 @@ export function SummaryCards({ subscriptions, transactions }) {
 }
 
 function Summary({ value, label, compact }) {
-  return <article className="summary-card"><span className={`summary-value${compact ? " summary-value--compact" : ""}`}>{value}</span><span className="summary-label">{label}</span></article>;
+  return <article className="summary-card">
+    <span className={`summary-value${compact ? " summary-value--compact" : ""}`}>
+      {value}
+    </span>
+    <span className="summary-label">{label}</span>
+  </article>;
 }
 
 function SubscriptionContent({ item, referenceDate }) {
@@ -65,7 +92,8 @@ export function SubscriptionsTable({ subscriptions, loading, error, transactions
 }
 
 export function RecentTransactions({ transactions, loading, error }) {
-  const [query, setQuery] = useState(""); const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const filtered = useMemo(() => transactions.filter((item) => item.merchant_name.toLowerCase().includes(query.trim().toLowerCase())), [query, transactions]);
   const shown = expanded ? filtered : filtered.slice(0, 10);
   return <section className="panel" aria-labelledby="transactions-heading"><div className="panel-heading panel-heading--tools"><div><p className="section-kicker">Activity</p><h2 id="transactions-heading">Recent transactions</h2></div>
@@ -78,13 +106,39 @@ export function RecentTransactions({ transactions, loading, error }) {
   </section>;
 }
 
-export function LoadingState({ label }) { return <div className="state state--loading" role="status"><span className="spinner" />{label}…</div>; }
-export function ErrorState({ title, message }) { return <div className="state state--error" role="alert"><strong>{title}</strong><span>{message}</span></div>; }
-export function EmptyState({ title, message }) { return <div className="state"><span className="empty-mark" aria-hidden="true">—</span><strong>{title}</strong><span>{message}</span></div>; }
+export function LoadingState({ label }) {
+  return <div className="state state--loading" role="status">
+    <span className="spinner" />
+    {label}…
+  </div>;
+}
+
+export function ErrorState({ title, message }) {
+  return <div className="state state--error" role="alert">
+    <strong>{title}</strong>
+    <span>{message}</span>
+  </div>;
+}
+
+export function EmptyState({ title, message }) {
+  return <div className="state">
+    <span className="empty-mark" aria-hidden="true">—</span>
+    <strong>{title}</strong>
+    <span>{message}</span>
+  </div>;
+}
 
 export function DetectionModal({ groups, loading, error, onClose }) {
-  const [tab, setTab] = useState("groups"); const [filter, setFilter] = useState("likely");
-  const analysis = groups?.subscription_analysis; const categories = { likely: analysis?.likely_subscriptions || [], possible: analysis?.possible_subscriptions || [], unlikely: analysis?.unlikely_subscriptions || [] };
+  // The modal exposes diagnostic heuristic results alongside, but separately
+  // from, any finalized subscription assessment stored for the dashboard.
+  const [tab, setTab] = useState("groups");
+  const [filter, setFilter] = useState("likely");
+  const analysis = groups?.subscription_analysis;
+  const categories = {
+    likely: analysis?.likely_subscriptions || [],
+    possible: analysis?.possible_subscriptions || [],
+    unlikely: analysis?.unlikely_subscriptions || []
+  };
   const groupCount = (groups?.repeated_merchants?.length || 0) + (groups?.likely_one_off_merchants?.length || 0);
   const resultCount = Object.values(categories).reduce((sum, items) => sum + items.length, 0);
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="detection-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -104,7 +158,9 @@ function AnalysisSection({ title, items = [], simple }) {
 }
 function SimpleGroup({ group }) { return <details className="analysis-card"><summary><span><strong>{group.display_merchant}</strong><small>{group.transaction_count} transaction{group.transaction_count === 1 ? "" : "s"}</small></span><StatusBadge value="neutral">Merchant group</StatusBadge></summary><TransactionList items={group.transactions} /></details>; }
 function AnalysisCard({ group }) {
-  const cadence = group.detected_cadence; const amount = group.amount_analysis; const final = group.final_assessment;
+  const cadence = group.detected_cadence;
+  const amount = group.amount_analysis;
+  const final = group.final_assessment;
   return <details className="analysis-card"><summary><span><strong>{group.display_merchant}</strong><small>{cadenceLabel(cadence.label, cadence.typical_interval_days)} · {group.transaction_count} charges · {formatCurrency(amount.typical_amount)} typical</small></span><StatusBadge value={group.classification}>{titleize(group.classification)}</StatusBadge></summary>
     <div className="assessment-grid"><Metric label="Heuristic result"><StatusBadge value={group.classification} /></Metric><Metric label="Final result">{final ? <StatusBadge value={final.final_classification}>{titleize(final.final_classification)}</StatusBadge> : "Not stored"}</Metric><Metric label="Assessment source">{final ? sourceLabels[final.assessment_source] || titleize(final.assessment_source) : "Deterministic only"}</Metric><Metric label="LLM status">{final ? titleize(final.llm_review_status) : "Not requested"}</Metric><Metric label="Confidence">{Math.round(group.confidence_score * 100)}%</Metric><Metric label="Cadence">{cadenceLabel(cadence.label, cadence.typical_interval_days)}</Metric></div>
     <div className="evidence-grid"><Evidence title="Timing" rows={[['Observed intervals', cadence.intervals_days.length ? `${cadence.intervals_days.join(", ")} days` : "Not enough history"], ['Timing consistency', `${Math.round(cadence.consistency_score * 100)}%`], ['Intervals explained', `${Math.round((cadence.explained_ratio || 0) * 100)}%`]]} /><Evidence title="Amounts" rows={[['Typical amount', formatCurrency(amount.typical_amount)], ['Amount range', `${formatCurrency(amount.min_amount)}–${formatCurrency(amount.max_amount)}`], ['Within 5%', `${Math.round(amount.within_five_percent_ratio * 100)}%`]]} /><Evidence title="History" rows={[['Transaction count', group.transaction_count], ['Evidence strength', `${Math.round(group.evidence_strength_score * 100)}%`], ['Pattern quality', `${Math.round(group.pattern_quality_score * 100)}%`]]} /><Evidence title="Activity" rows={[['Status', group.activity.apparently_active == null ? "Unavailable" : group.activity.apparently_active ? "Apparently active" : "Apparently inactive"], ['Days since last charge', group.activity.days_since_last_charge]]} /></div>
